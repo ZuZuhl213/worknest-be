@@ -1,0 +1,18 @@
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+
+    full_name VARCHAR(100) NOT NULL,
+
+    avatar_url VARCHAR(500),
+
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_users_email
+ON users(email);
