@@ -1,5 +1,12 @@
 package com.hoang.worknest.repository;
 
-public class WorkspaceRepository {
-    
+import java.util.Optional;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import com.hoang.worknest.entity.Workspace;
+
+public interface WorkspaceRepository extends JpaRepository<Workspace, Long> {
+    Optional<Workspace> findBySlug(String slug);
+    boolean existsBySlug(String slug);
 }

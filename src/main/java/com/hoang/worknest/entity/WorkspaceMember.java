@@ -1,7 +1,6 @@
 package com.hoang.worknest.entity;
 
 import java.time.OffsetDateTime;
-import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -13,6 +12,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -40,9 +40,9 @@ import lombok.Setter;
 public class WorkspaceMember {
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false, updatable = false)
-    private UUID id;
+    private Long id;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "workspace_id", nullable = false)

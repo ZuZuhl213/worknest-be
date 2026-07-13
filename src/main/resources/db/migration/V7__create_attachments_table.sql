@@ -1,6 +1,6 @@
 CREATE TABLE attachments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    task_id UUID NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    task_id BIGINT NOT NULL,
     uploaded_by_user_id BIGINT NOT NULL,
     file_name VARCHAR(255) NOT NULL,
     content_type VARCHAR(150),

@@ -1,6 +1,6 @@
 CREATE TABLE tasks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    project_id BIGINT NOT NULL,
     task_number BIGINT NOT NULL,
     title VARCHAR(200) NOT NULL,
     description TEXT,

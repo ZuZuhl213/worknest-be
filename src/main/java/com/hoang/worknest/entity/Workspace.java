@@ -2,7 +2,6 @@ package com.hoang.worknest.entity;
 
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -36,9 +35,9 @@ import lombok.Setter;
 public class Workspace {
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = jakarta.persistence.GenerationType.IDENTITY)
     @Column(name = "id", nullable = false, updatable = false)
-    private UUID id;
+    private Long id;
 
     @Column(name = "name", nullable = false, length = 150)
     private String name;

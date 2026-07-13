@@ -1,18 +1,32 @@
 CREATE TABLE activity_logs (
     id BIGSERIAL PRIMARY KEY,
-
+    workspace_id BIGINT NOT NULL,
+    project_id BIGINT,
+    task_id BIGINT,
+    actor_user_id BIGINT,
     entity_type VARCHAR(50) NOT NULL,
     entity_id BIGINT NOT NULL,
+    action VARCHAR(100) NOT NULL,
+    details JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    action VARCHAR(50) NOT NULL,
-
-    performed_by BIGINT NOT NULL,
-
-    metadata JSONB,
-
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT fk_activity_user
-        FOREIGN KEY (performed_by)
-        REFERENCES users(id)
+    CONSTRAINT fk_activity_logs_workspace
+        FOREIGN KEY (workspace_id) REFERENCES workspaces (id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_activity_logs_project
+        FOREIGN KEY (project_id) REFERENCES projects (id)
+        ON DELETE SET NULL,
+    CONSTRAINT fk_activity_logs_task
+        FOREIGN KEY (task_id) REFERENCES tasks (id)
+        ON DELETE SET NULL,
+    CONSTRAINT fk_activity_logs_actor_user
+        FOREIGN KEY (actor_user_id) REFERENCES users (id)
+        ON DELETE SET NULL,
+    CONSTRAINT chk_activity_logs_action_not_blank CHECK (btrim(action) <> ''),
+    CONSTRAINT chk_activity_logs_entity_type_not_blank CHECK (btrim(entity_type) <> '')
 );
+
+CREATE INDEX idx_activity_logs_workspace_created_at ON activity_logs (workspace_id, created_at);
+CREATE INDEX idx_activity_logs_task_created_at ON activity_logs (task_id, created_at);
+CREATE INDEX idx_activity_logs_actor_user_id ON activity_logs (actor_user_id);
+CREATE INDEX idx_activity_logs_entity_lookup ON activity_logs (entity_type, entity_id);

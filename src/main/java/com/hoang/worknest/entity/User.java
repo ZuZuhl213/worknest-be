@@ -5,6 +5,8 @@ import java.time.OffsetDateTime;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -35,6 +37,7 @@ public class User {
     private String email;
 
     @Column(name = "password_hash", nullable = false, length = 255)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String passwordHash;
 
     @Column(name = "full_name", nullable = false, length = 120)
