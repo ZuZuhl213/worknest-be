@@ -56,7 +56,8 @@ public class SecurityConfig {
                     "/api/auth/login",
                     "/api/auth/csrf",
                     "/api/auth/refresh",
-                    "/api/auth/logout"
+                    "/api/auth/logout",
+                    "/api/health"
                 ).permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
