@@ -54,7 +54,7 @@ spring:
             threadCount: 3
 
 server:
-  port: ${SERVER_PORT}
+  port: ${PORT:8080}
   forward-headers-strategy: framework
 
 aws:
