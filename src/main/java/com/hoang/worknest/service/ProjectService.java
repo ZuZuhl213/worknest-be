@@ -3,7 +3,6 @@ package com.hoang.worknest.service;
 import java.util.List;
 
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,6 +20,7 @@ import com.hoang.worknest.repository.ProjectRepository;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.security.AuthenticatedUser;
 import com.hoang.worknest.security.CurrentUserService;
+import com.hoang.worknest.security.ProjectAuthorizationService;
 import com.hoang.worknest.security.WorkspaceAccessService;
 
 import lombok.RequiredArgsConstructor;
@@ -35,6 +35,7 @@ public class ProjectService {
     private final CurrentUserService currentUserService;
     private final UserRepository userRepository;
     private final ActivityLogService activityLogService;
+    private final ProjectAuthorizationService projectAuthorizationService;
 
     @Transactional
     @CacheEvict(cacheNames = CacheConfig.PROJECTS_BY_WORKSPACE, allEntries = true)
@@ -68,22 +69,20 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.PROJECTS_BY_WORKSPACE, key = "#workspaceId + ':' + @currentUserService.getCurrentUser().id()")
     public List<ProjectResponse> getByWorkspace(Long workspaceId) {
         workspaceAccessService.requireWorkspaceMember(workspaceId);
-        return projectRepository.findByWorkspaceId(workspaceId).stream()
+        AuthenticatedUser currentUser = currentUserService.getCurrentUser();
+        List<Project> projects = projectAuthorizationService.isWorkspaceAdmin(workspaceId)
+            ? projectRepository.findByWorkspaceId(workspaceId)
+            : projectRepository.findAccessibleByWorkspaceAndUser(workspaceId, currentUser.id());
+        return projects.stream()
             .map(projectMapper::toResponse)
             .toList();
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.PROJECT_DETAIL, key = "#workspaceId + ':' + #projectId + ':' + @currentUserService.getCurrentUser().id()")
     public ProjectResponse getById(Long workspaceId, Long projectId) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
-        return projectRepository.findById(projectId)
-            .filter(project -> project.getWorkspace().getId().equals(workspaceId))
-            .map(projectMapper::toResponse)
-            .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
+        return projectMapper.toResponse(projectAuthorizationService.requireAccess(workspaceId, projectId));
     }
 
     @Transactional
@@ -97,8 +96,8 @@ public class ProjectService {
         allEntries = true
     )
     public ProjectResponse update(Long workspaceId, Long projectId, ProjectUpdateRequest request) {
-        Workspace workspace = workspaceAccessService.requireWorkspaceAdmin(workspaceId);
-        Project project = findProjectInWorkspace(workspaceId, projectId);
+        Project project = projectAuthorizationService.requireLead(workspaceId, projectId);
+        Workspace workspace = project.getWorkspace();
         String normalizedProjectKey = normalizeProjectKey(request.projectKey());
         validateProjectUniqueness(workspaceId, normalizedProjectKey, request.name(), projectId);
 
@@ -133,8 +132,8 @@ public class ProjectService {
         allEntries = true
     )
     public void delete(Long workspaceId, Long projectId) {
-        Workspace workspace = workspaceAccessService.requireWorkspaceAdmin(workspaceId);
-        Project project = findProjectInWorkspace(workspaceId, projectId);
+        Project project = projectAuthorizationService.requireLead(workspaceId, projectId);
+        Workspace workspace = project.getWorkspace();
         User actor = userRepository.findById(currentUserService.getCurrentUser().id())
             .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
 
@@ -149,12 +148,6 @@ public class ProjectService {
             "{\"projectKey\":\"" + project.getProjectKey() + "\"}"
         );
         projectRepository.delete(project);
-    }
-
-    public Project findProjectInWorkspace(Long workspaceId, Long projectId) {
-        return projectRepository.findById(projectId)
-            .filter(project -> project.getWorkspace().getId().equals(workspaceId))
-            .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
     }
 
     private void validateProjectUniqueness(Long workspaceId, String projectKey, String name, Long projectIdToExclude) {

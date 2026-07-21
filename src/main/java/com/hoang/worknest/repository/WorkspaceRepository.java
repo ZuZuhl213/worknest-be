@@ -9,4 +9,5 @@ import com.hoang.worknest.entity.Workspace;
 public interface WorkspaceRepository extends JpaRepository<Workspace, Long> {
     Optional<Workspace> findBySlug(String slug);
     boolean existsBySlug(String slug);
+    boolean existsByOwnerId(Long ownerId);
 }

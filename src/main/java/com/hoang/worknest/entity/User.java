@@ -6,9 +6,12 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.hoang.worknest.enums.SystemRole;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -46,6 +49,9 @@ public class User {
     @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl;
 
+    @Column(name = "avatar_object_key", columnDefinition = "TEXT")
+    private String avatarObjectKey;
+
     @Column(name = "is_active", nullable = false)
     @Builder.Default
     private Boolean isActive = Boolean.TRUE;
@@ -53,6 +59,18 @@ public class User {
     @Column(name = "email_verified", nullable = false)
     @Builder.Default
     private Boolean emailVerified = Boolean.FALSE;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "system_role", nullable = false, length = 20)
+    @Builder.Default
+    private SystemRole systemRole = SystemRole.USER;
+
+    @Column(name = "token_version", nullable = false)
+    @Builder.Default
+    private Integer tokenVersion = 0;
+
+    @Column(name = "deactivated_at")
+    private OffsetDateTime deactivatedAt;
 
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;

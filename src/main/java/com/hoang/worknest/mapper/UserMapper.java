@@ -1,23 +1,29 @@
 package com.hoang.worknest.mapper;
 
-import org.mapstruct.Mapper;
-import org.mapstruct.Mapping;
+import org.springframework.stereotype.Component;
 
-import com.hoang.worknest.dto.user.UserCreateRequest;
 import com.hoang.worknest.dto.user.UserResponse;
 import com.hoang.worknest.entity.User;
 
-@Mapper(componentModel = "spring")
-public interface UserMapper {
+@Component
+public class UserMapper {
 
-    UserResponse toResponse(User user);
-
-    @Mapping(target = "id", ignore = true)
-    @Mapping(target = "passwordHash", source = "password")
-    @Mapping(target = "isActive", constant = "true")
-    @Mapping(target = "emailVerified", constant = "false")
-    @Mapping(target = "lastLoginAt", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    User toEntity(UserCreateRequest request);
+    public UserResponse toResponse(User user) {
+        if (user == null) {
+            return null;
+        }
+        return new UserResponse(
+            user.getId(),
+            user.getEmail(),
+            user.getFullName(),
+            user.getAvatarUrl(),
+            user.getIsActive(),
+            user.getEmailVerified(),
+            user.getSystemRole(),
+            user.getDeactivatedAt(),
+            user.getLastLoginAt(),
+            user.getCreatedAt(),
+            user.getUpdatedAt()
+        );
+    }
 }

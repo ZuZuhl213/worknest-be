@@ -1,10 +1,12 @@
 package com.hoang.worknest.service;
 
+import java.io.IOException;
+import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -12,13 +14,16 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.hoang.worknest.config.CacheConfig;
 import com.hoang.worknest.dto.common.PagedResponse;
+import com.hoang.worknest.dto.task.AttachmentResponse;
 import com.hoang.worknest.dto.task.TaskAssignRequest;
 import com.hoang.worknest.dto.task.TaskCreateRequest;
 import com.hoang.worknest.dto.task.TaskResponse;
 import com.hoang.worknest.dto.task.TaskUpdateRequest;
+import com.hoang.worknest.entity.Attachment;
 import com.hoang.worknest.entity.Project;
 import com.hoang.worknest.entity.Task;
 import com.hoang.worknest.entity.User;
@@ -26,20 +31,14 @@ import com.hoang.worknest.enums.TaskPriority;
 import com.hoang.worknest.enums.TaskStatus;
 import com.hoang.worknest.exception.ResourceNotFoundException;
 import com.hoang.worknest.mapper.TaskMapper;
+import com.hoang.worknest.mapper.UserMapper;
+import com.hoang.worknest.repository.AttachmentRepository;
 import com.hoang.worknest.repository.TaskRepository;
 import com.hoang.worknest.repository.UserRepository;
-import com.hoang.worknest.repository.WorkspaceMemberRepository;
+import com.hoang.worknest.repository.ProjectMemberRepository;
 import com.hoang.worknest.repository.specification.TaskSpecifications;
 import com.hoang.worknest.security.CurrentUserService;
-import com.hoang.worknest.security.WorkspaceAccessService;
-
-import com.hoang.worknest.entity.Attachment;
-import com.hoang.worknest.repository.AttachmentRepository;
-import com.hoang.worknest.dto.task.AttachmentResponse;
-import com.hoang.worknest.service.FileStorageService;
-import org.springframework.web.multipart.MultipartFile;
-import java.io.IOException;
-import java.time.Duration;
+import com.hoang.worknest.security.ProjectAuthorizationService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -53,24 +52,26 @@ public class TaskService {
     );
 
     private final TaskRepository taskRepository;
-    private final ProjectService projectService;
-    private final WorkspaceAccessService workspaceAccessService;
     private final UserRepository userRepository;
-    private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final ProjectMemberRepository projectMemberRepository;
     private final TaskMapper taskMapper;
+    private final UserMapper userMapper;
     private final CurrentUserService currentUserService;
     private final NotificationService notificationService;
     private final ActivityLogService activityLogService;
     private final AttachmentRepository attachmentRepository;
     private final FileStorageService fileStorageService;
+    private final ProjectAuthorizationService projectAuthorizationService;
 
     @Transactional
     @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, allEntries = true)
     public TaskResponse create(Long workspaceId, Long projectId, TaskCreateRequest request) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
-        Project project = projectService.findProjectInWorkspace(workspaceId, projectId);
+        Project project = projectAuthorizationService.requireMember(workspaceId, projectId);
         User reporter = requireCurrentUserEntity();
-        User assignee = resolveAssignee(workspaceId, request.assigneeUserId());
+        if (request.assigneeUserId() != null) {
+            projectAuthorizationService.requireLead(workspaceId, projectId);
+        }
+        User assignee = resolveAssignee(projectId, request.assigneeUserId());
 
         long nextTaskNumber = taskRepository.findMaxTaskNumberByProjectId(projectId) + 1L;
 
@@ -98,10 +99,6 @@ public class TaskService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(
-        cacheNames = CacheConfig.TASKS_BY_PROJECT,
-        key = "#workspaceId + ':' + #projectId + ':' + @currentUserService.getCurrentUser().id() + ':' + #status + ':' + #priority + ':' + #assigneeId + ':' + #search + ':' + #dueFrom + ':' + #dueTo + ':' + #page + ':' + #size + ':' + #sortBy + ':' + #sortDirection"
-    )
     public PagedResponse<TaskResponse> getByProject(
         Long workspaceId,
         Long projectId,
@@ -116,8 +113,7 @@ public class TaskService {
         String sortBy,
         String sortDirection
     ) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
-        projectService.findProjectInWorkspace(workspaceId, projectId);
+        projectAuthorizationService.requireAccess(workspaceId, projectId);
         validatePageRequest(page, size, sortBy);
 
         Sort sort = Sort.by(Sort.Direction.fromString(sortDirection), sortBy);
@@ -143,9 +139,8 @@ public class TaskService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.TASK_DETAIL, key = "#workspaceId + ':' + #projectId + ':' + #taskId + ':' + @currentUserService.getCurrentUser().id()")
     public TaskResponse getById(Long workspaceId, Long projectId, Long taskId) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireAccess(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
         return taskMapper.toResponse(task);
     }
@@ -159,11 +154,14 @@ public class TaskService {
         allEntries = true
     )
     public TaskResponse update(Long workspaceId, Long projectId, Long taskId, TaskUpdateRequest request) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireMember(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
         User actor = requireCurrentUserEntity();
-        User assignee = resolveAssignee(workspaceId, request.assigneeUserId());
         Long oldAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
+        if (!java.util.Objects.equals(oldAssigneeId, request.assigneeUserId())) {
+            projectAuthorizationService.requireLead(workspaceId, projectId);
+        }
+        User assignee = resolveAssignee(projectId, request.assigneeUserId());
 
         taskMapper.updateEntity(request, task);
         task.setAssignee(assignee);
@@ -195,10 +193,10 @@ public class TaskService {
         allEntries = true
     )
     public TaskResponse assign(Long workspaceId, Long projectId, Long taskId, TaskAssignRequest request) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireLead(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
         User actor = requireCurrentUserEntity();
-        User assignee = resolveAssignee(workspaceId, request.assigneeUserId());
+        User assignee = resolveAssignee(projectId, request.assigneeUserId());
         Long oldAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
 
         task.setAssignee(assignee);
@@ -228,13 +226,23 @@ public class TaskService {
         allEntries = true
     )
     public void delete(Long workspaceId, Long projectId, Long taskId) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireAccess(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
+        User currentUser = requireCurrentUserEntity();
+
+        // Reporter can always delete their own task.
+        // Otherwise, user must be project LEAD or workspace ADMIN/OWNER.
+        boolean isReporter = task.getReporter() != null && task.getReporter().getId().equals(currentUser.getId());
+        if (!isReporter) {
+            // requireProjectLead will throw 403 if not LEAD/ADMIN/OWNER
+            projectAuthorizationService.requireLead(workspaceId, projectId);
+        }
+
         activityLogService.log(
             task.getProject().getWorkspace(),
             task.getProject(),
             task,
-            requireCurrentUserEntity(),
+            currentUser,
             "TASK_DELETED",
             "TASK",
             task.getId(),
@@ -250,13 +258,15 @@ public class TaskService {
             .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
     }
 
-    private User resolveAssignee(Long workspaceId, Long assigneeUserId) {
+    private User resolveAssignee(Long projectId, Long assigneeUserId) {
         if (assigneeUserId == null) {
             return null;
         }
-        workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, assigneeUserId)
-            .orElseThrow(() -> new ResourceNotFoundException("Assignee is not a member of this workspace"));
+        projectMemberRepository.findByProjectIdAndUserId(projectId, assigneeUserId)
+            .filter(member -> member.getRole() != com.hoang.worknest.enums.ProjectRole.VIEWER)
+            .orElseThrow(() -> new ResourceNotFoundException("Assignee must be a project member or lead"));
         return userRepository.findById(assigneeUserId)
+            .filter(user -> Boolean.TRUE.equals(user.getIsActive()))
             .orElseThrow(() -> new ResourceNotFoundException("Assignee user not found"));
     }
 
@@ -295,26 +305,27 @@ public class TaskService {
             .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
         
         Long workspaceId = task.getProject().getWorkspace().getId();
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        Long projectId = task.getProject().getId();
+        projectAuthorizationService.requireMember(workspaceId, projectId);
         
         User uploader = requireCurrentUserEntity();
         
         try {
-            String objectKey = fileStorageService.uploadFile(file, "tasks/" + taskId);
+            FileStorageService.StoredFile stored = fileStorageService.uploadAttachment(file, "tasks/" + taskId);
             
             Attachment attachment = Attachment.builder()
                 .task(task)
                 .uploadedBy(uploader)
-                .fileName(file.getOriginalFilename())
-                .contentType(file.getContentType())
-                .fileSize(file.getSize())
+                .fileName(safeDisplayName(file.getOriginalFilename()))
+                .contentType(stored.contentType())
+                .fileSize(stored.size())
                 .bucketName(fileStorageService.getBucketName())
-                .objectKey(objectKey)
+                .objectKey(stored.objectKey())
                 .build();
                 
             attachment = attachmentRepository.save(attachment);
             
-            String url = fileStorageService.generatePresignedUrl(objectKey, Duration.ofMinutes(60));
+            String url = fileStorageService.generatePresignedUrl(stored.objectKey(), Duration.ofMinutes(10));
             return new AttachmentResponse(
                 attachment.getId(),
                 attachment.getFileName(),
@@ -335,10 +346,11 @@ public class TaskService {
             .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
             
         Long workspaceId = task.getProject().getWorkspace().getId();
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        Long projectId = task.getProject().getId();
+        projectAuthorizationService.requireAccess(workspaceId, projectId);
         
         return attachmentRepository.findByTaskId(taskId).stream().map(attachment -> {
-            String url = fileStorageService.generatePresignedUrl(attachment.getObjectKey(), Duration.ofMinutes(60));
+            String url = fileStorageService.generatePresignedUrl(attachment.getObjectKey(), Duration.ofMinutes(10));
             return new AttachmentResponse(
                 attachment.getId(),
                 attachment.getFileName(),
@@ -349,5 +361,13 @@ public class TaskService {
                 attachment.getCreatedAt()
             );
         }).toList();
+    }
+
+    private String safeDisplayName(String originalFilename) {
+        String name = originalFilename == null ? "attachment" : originalFilename;
+        name = name.replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1).replaceAll("[\\r\\n\\u0000]", "").trim();
+        if (name.isBlank()) return "attachment";
+        return name.length() > 255 ? name.substring(name.length() - 255) : name;
     }
 }

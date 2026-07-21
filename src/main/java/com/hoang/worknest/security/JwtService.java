@@ -6,12 +6,12 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -28,15 +28,24 @@ public class JwtService {
     private final ObjectMapper objectMapper;
     private final byte[] signingKey;
     private final long accessTokenExpirationMs;
+    private final String issuer;
+    private final String audience;
 
     public JwtService(
         ObjectMapper objectMapper,
         @Value("${app.jwt.secret}") String secret,
-        @Value("${app.jwt.access-token-expiration}") long accessTokenExpirationMs
+        @Value("${app.jwt.access-token-expiration}") long accessTokenExpirationMs,
+        @Value("${app.jwt.issuer:worknest}") String issuer,
+        @Value("${app.jwt.audience:worknest-web}") String audience
     ) {
+        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalStateException("JWT secret must contain at least 32 bytes");
+        }
         this.objectMapper = objectMapper;
         this.signingKey = secret.getBytes(StandardCharsets.UTF_8);
         this.accessTokenExpirationMs = accessTokenExpirationMs;
+        this.issuer = issuer;
+        this.audience = audience;
     }
 
     public String generateAccessToken(User user) {
@@ -44,11 +53,12 @@ public class JwtService {
         Instant expiresAt = now.plusMillis(accessTokenExpirationMs);
 
         Map<String, Object> claims = new LinkedHashMap<>();
-        claims.put("sub", user.getEmail());
+        claims.put("sub", user.getId().toString());
         claims.put("type", "access");
-        claims.put("userId", user.getId());
-        claims.put("email", user.getEmail());
-        claims.put("fullName", user.getFullName());
+        claims.put("iss", issuer);
+        claims.put("aud", audience);
+        claims.put("jti", UUID.randomUUID().toString());
+        claims.put("tokenVersion", user.getTokenVersion());
         claims.put("iat", now.getEpochSecond());
         claims.put("exp", expiresAt.getEpochSecond());
 
@@ -59,20 +69,27 @@ public class JwtService {
         return Instant.now().plusMillis(accessTokenExpirationMs);
     }
 
-    public String extractUsername(String token) {
-        return (String) decodePayload(token).get("sub");
+    public Long extractUserId(String token) {
+        return Long.valueOf((String) decodePayload(token).get("sub"));
     }
 
-    public boolean isAccessTokenValid(String token, UserDetails userDetails) {
+    public boolean isAccessTokenValid(String token, User user) {
         Map<String, Object> payload = decodePayload(token);
         String subject = (String) payload.get("sub");
         String type = (String) payload.get("type");
         long exp = readLong(payload.get("exp"));
+        long issuedAt = readLong(payload.get("iat"));
+        long tokenVersion = readLong(payload.get("tokenVersion"));
 
         return verifySignature(token)
             && "access".equals(type)
+            && issuer.equals(payload.get("iss"))
+            && audience.equals(payload.get("aud"))
             && subject != null
-            && subject.equals(userDetails.getUsername())
+            && subject.equals(user.getId().toString())
+            && Boolean.TRUE.equals(user.getIsActive())
+            && tokenVersion == user.getTokenVersion()
+            && issuedAt <= Instant.now().plusSeconds(30).getEpochSecond()
             && exp > Instant.now().getEpochSecond();
     }
 
@@ -91,7 +108,7 @@ public class JwtService {
     }
 
     private Map<String, Object> decodePayload(String token) {
-        if (!verifySignature(token)) {
+        if (!verifySignature(token) || !verifyHeader(token)) {
             throw new IllegalArgumentException("Invalid token signature");
         }
 
@@ -105,6 +122,22 @@ public class JwtService {
             });
         } catch (Exception ex) {
             throw new IllegalArgumentException("Invalid token payload", ex);
+        }
+    }
+
+    private boolean verifyHeader(String token) {
+        try {
+            String[] segments = token.split("\\.");
+            if (segments.length != 3) {
+                return false;
+            }
+            Map<String, Object> header = objectMapper.readValue(
+                URL_DECODER.decode(segments[0]),
+                new TypeReference<>() { }
+            );
+            return "HS256".equals(header.get("alg")) && "JWT".equals(header.get("typ"));
+        } catch (Exception ex) {
+            return false;
         }
     }
 

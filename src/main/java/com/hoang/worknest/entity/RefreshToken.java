@@ -1,6 +1,7 @@
 package com.hoang.worknest.entity;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -12,6 +13,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -37,15 +39,24 @@ public class RefreshToken {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "token", nullable = false, unique = true, length = 255)
-    private String token;
+    @Column(name = "token_hash", nullable = false, unique = true, length = 64)
+    private String tokenHash;
+
+    @Column(name = "family_id", nullable = false)
+    private UUID familyId;
 
     @Column(name = "expires_at", nullable = false)
     private OffsetDateTime expiresAt;
 
-    @Column(name = "revoked", nullable = false)
-    @Builder.Default
-    private Boolean revoked = Boolean.FALSE;
+    @Column(name = "used_at")
+    private OffsetDateTime usedAt;
+
+    @Column(name = "revoked_at")
+    private OffsetDateTime revokedAt;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "replaced_by_token_id")
+    private RefreshToken replacedBy;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

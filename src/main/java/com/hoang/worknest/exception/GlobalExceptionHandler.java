@@ -1,9 +1,12 @@
 package com.hoang.worknest.exception;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -49,15 +52,38 @@ public class GlobalExceptionHandler {
         return errorBody(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<Map<String, Object>> handleTooManyRequests(TooManyRequestsException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header("Retry-After", Long.toString(ex.getRetryAfterSeconds()))
+            .body(errorBody(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage()));
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public Map<String, Object> handleServiceUnavailable(ServiceUnavailableException ex) {
+        return errorBody(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, Object> handleValidation(MethodArgumentNotValidException ex) {
-        String message = ex.getBindingResult().getFieldErrors().stream()
-            .findFirst()
-            .map(error -> error.getField() + ": " + error.getDefaultMessage())
-            .orElse("Validation failed");
+        Map<String, String> fields = ex.getBindingResult().getFieldErrors().stream()
+            .collect(Collectors.toMap(
+                error -> error.getField(),
+                error -> error.getDefaultMessage() == null ? "Invalid value" : error.getDefaultMessage(),
+                (first, ignored) -> first,
+                LinkedHashMap::new
+            ));
+        String message = fields.isEmpty()
+            ? "Validation failed"
+            : "Validation failed: " + String.join("; ", fields.entrySet().stream()
+                .map(entry -> entry.getKey() + ": " + entry.getValue())
+                .toList());
 
-        return errorBody(HttpStatus.BAD_REQUEST, message);
+        Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.BAD_REQUEST, message));
+        body.put("fields", fields);
+        return body;
     }
 
     private Map<String, Object> errorBody(HttpStatus status, String message) {

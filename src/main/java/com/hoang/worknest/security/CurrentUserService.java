@@ -26,7 +26,7 @@ public class CurrentUserService {
         }
 
         String email = authentication.getName();
-        User user = userRepository.findByEmail(email)
+        User user = userRepository.findByEmailIgnoreCase(email)
             .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
 
         return new AuthenticatedUser(
@@ -35,6 +35,8 @@ public class CurrentUserService {
             user.getFullName(),
             user.getEmailVerified(),
             user.getIsActive(),
+            user.getSystemRole(),
+            user.getTokenVersion(),
             user.getLastLoginAt()
         );
     }

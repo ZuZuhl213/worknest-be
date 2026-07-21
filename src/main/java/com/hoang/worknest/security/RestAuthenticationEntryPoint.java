@@ -30,12 +30,18 @@ public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
     ) throws IOException {
         response.setStatus(HttpStatus.UNAUTHORIZED.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        String authorization = request.getHeader("Authorization");
+        String message = authorization != null && authorization.startsWith("Bearer ")
+            ? "Access token is invalid or expired. Please sign in again."
+            : request.getRequestURI().endsWith("/refresh")
+                ? "Refresh session is missing or expired. Please sign in again."
+                : "Authentication is required. Please sign in.";
 
         objectMapper.writeValue(response.getOutputStream(), Map.of(
             "timestamp", OffsetDateTime.now().toString(),
             "status", HttpStatus.UNAUTHORIZED.value(),
             "error", HttpStatus.UNAUTHORIZED.getReasonPhrase(),
-            "message", "Authentication is required"
+            "message", message
         ));
     }
 }

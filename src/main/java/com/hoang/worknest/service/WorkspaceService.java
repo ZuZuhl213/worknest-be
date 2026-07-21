@@ -2,9 +2,9 @@ package com.hoang.worknest.service;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +19,7 @@ import com.hoang.worknest.entity.User;
 import com.hoang.worknest.entity.Workspace;
 import com.hoang.worknest.entity.WorkspaceMember;
 import com.hoang.worknest.enums.Role;
+import com.hoang.worknest.enums.ProjectRole;
 import com.hoang.worknest.exception.ConflictException;
 import com.hoang.worknest.exception.ForbiddenException;
 import com.hoang.worknest.exception.ResourceNotFoundException;
@@ -27,6 +28,7 @@ import com.hoang.worknest.mapper.WorkspaceMapper;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.repository.WorkspaceMemberRepository;
 import com.hoang.worknest.repository.WorkspaceRepository;
+import com.hoang.worknest.repository.ProjectMemberRepository;
 import com.hoang.worknest.security.AuthenticatedUser;
 import com.hoang.worknest.security.CurrentUserService;
 import com.hoang.worknest.security.WorkspaceAccessService;
@@ -45,6 +47,8 @@ public class WorkspaceService {
     private final CurrentUserService currentUserService;
     private final WorkspaceAccessService workspaceAccessService;
     private final ActivityLogService activityLogService;
+    private final ProjectMemberRepository projectMemberRepository;
+    private final SecurityAuditService securityAuditService;
 
     @Transactional
     @CacheEvict(
@@ -90,7 +94,6 @@ public class WorkspaceService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.CURRENT_USER_WORKSPACES, key = "@currentUserService.getCurrentUser().id()")
     public List<WorkspaceResponse> getAll() {
         Long currentUserId = currentUserService.getCurrentUser().id();
         return workspaceMemberRepository.findByUserId(currentUserId).stream()
@@ -100,7 +103,6 @@ public class WorkspaceService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.WORKSPACE_DETAIL, key = "#id + ':' + @currentUserService.getCurrentUser().id()")
     public WorkspaceResponse getById(Long id) {
         Workspace workspace = workspaceAccessService.requireWorkspaceMember(id);
         return workspaceMapper.toResponse(workspace);
@@ -159,7 +161,6 @@ public class WorkspaceService {
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = CacheConfig.WORKSPACE_MEMBERS, key = "#workspaceId + ':' + @currentUserService.getCurrentUser().id()")
     public List<WorkspaceMemberResponse> getMembers(Long workspaceId) {
         workspaceAccessService.requireWorkspaceMember(workspaceId);
         return workspaceMemberRepository.findByWorkspaceId(workspaceId).stream()
@@ -178,7 +179,7 @@ public class WorkspaceService {
     public WorkspaceMemberResponse inviteMember(Long workspaceId, WorkspaceInviteMemberRequest request) {
         Workspace workspace = workspaceAccessService.requireWorkspaceAdmin(workspaceId);
         User inviter = getCurrentUserEntity();
-        User invitedUser = userRepository.findByEmail(request.email())
+        User invitedUser = userRepository.findByEmailIgnoreCase(request.email().trim().toLowerCase(java.util.Locale.ROOT))
             .orElseThrow(() -> new ResourceNotFoundException("User to invite not found"));
 
         if (request.role() == Role.OWNER) {
@@ -198,6 +199,8 @@ public class WorkspaceService {
             .build();
 
         WorkspaceMember savedMember = workspaceMemberRepository.save(member);
+        securityAuditService.log(inviter, invitedUser, "WORKSPACE_MEMBER_ADDED", "SUCCESS",
+            Map.of("workspaceId", workspaceId, "role", savedMember.getRole().name()));
         activityLogService.log(
             workspace,
             null,
@@ -219,9 +222,10 @@ public class WorkspaceService {
         Long memberId,
         WorkspaceChangeMemberRoleRequest request
     ) {
-        Workspace workspace = workspaceAccessService.requireWorkspaceOwner(workspaceId);
+        Workspace workspace = workspaceAccessService.requireWorkspaceAdmin(workspaceId);
         User actor = getCurrentUserEntity();
         WorkspaceMember member = getWorkspaceMember(workspaceId, memberId);
+        WorkspaceMember actorMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
 
         if (member.getRole() == Role.OWNER) {
             throw new ForbiddenException("Owner role cannot be changed");
@@ -229,9 +233,15 @@ public class WorkspaceService {
         if (request.role() == Role.OWNER) {
             throw new ForbiddenException("Owner transfer is not supported by this endpoint");
         }
+        // ADMIN cannot change the role of another ADMIN (only OWNER can)
+        if (actorMembership.getRole() == Role.ADMIN && member.getRole() == Role.ADMIN) {
+            throw new ForbiddenException("Admins cannot change the role of other admins");
+        }
 
         member.setRole(request.role());
         WorkspaceMember savedMember = workspaceMemberRepository.save(member);
+        securityAuditService.log(actor, savedMember.getUser(), "WORKSPACE_MEMBER_ROLE_CHANGED", "SUCCESS",
+            Map.of("workspaceId", workspaceId, "role", savedMember.getRole().name()));
         activityLogService.log(
             workspace,
             null,
@@ -258,12 +268,21 @@ public class WorkspaceService {
         Workspace workspace = workspaceAccessService.requireWorkspaceAdmin(workspaceId);
         User actor = getCurrentUserEntity();
         WorkspaceMember member = getWorkspaceMember(workspaceId, memberId);
+        WorkspaceMember actorMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
 
         if (member.getRole() == Role.OWNER) {
             throw new ForbiddenException("Workspace owner cannot be removed");
         }
+        // ADMIN cannot remove another ADMIN (only OWNER can)
+        if (actorMembership.getRole() == Role.ADMIN && member.getRole() == Role.ADMIN) {
+            throw new ForbiddenException("Admins cannot remove other admins");
+        }
 
+        ensureNotLastProjectLead(workspaceId, member.getUser().getId());
+        projectMemberRepository.deleteByWorkspaceAndUser(workspaceId, member.getUser().getId());
         workspaceMemberRepository.delete(member);
+        securityAuditService.log(actor, member.getUser(), "WORKSPACE_MEMBER_REMOVED", "SUCCESS",
+            Map.of("workspaceId", workspaceId));
         activityLogService.log(
             workspace,
             null,
@@ -288,6 +307,18 @@ public class WorkspaceService {
         return workspaceMemberRepository.findById(memberId)
             .filter(member -> member.getWorkspace().getId().equals(workspaceId))
             .orElseThrow(() -> new ResourceNotFoundException("Workspace member not found"));
+    }
+
+    private void ensureNotLastProjectLead(Long workspaceId, Long userId) {
+        projectMemberRepository.findByProjectWorkspaceIdAndUserId(workspaceId, userId).stream()
+            .filter(projectMember -> projectMember.getRole() == ProjectRole.LEAD)
+            .forEach(projectMember -> {
+                if (projectMemberRepository
+                    .findByProjectIdAndRoleOrderById(projectMember.getProject().getId(), ProjectRole.LEAD)
+                    .size() <= 1) {
+                    throw new ConflictException("Assign another lead before removing this workspace member");
+                }
+            });
     }
 
     private User getCurrentUserEntity() {

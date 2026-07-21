@@ -1,5 +1,6 @@
 HELP.md
 target/
+*.log
 .env
 .env.*
 !.env.example

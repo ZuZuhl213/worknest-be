@@ -17,7 +17,7 @@ import com.hoang.worknest.mapper.TaskCommentMapper;
 import com.hoang.worknest.repository.TaskCommentRepository;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.security.CurrentUserService;
-import com.hoang.worknest.security.WorkspaceAccessService;
+import com.hoang.worknest.security.ProjectAuthorizationService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -28,7 +28,7 @@ public class TaskCommentService {
     private final TaskCommentRepository taskCommentRepository;
     private final TaskCommentMapper taskCommentMapper;
     private final TaskService taskService;
-    private final WorkspaceAccessService workspaceAccessService;
+    private final ProjectAuthorizationService projectAuthorizationService;
     private final CurrentUserService currentUserService;
     private final UserRepository userRepository;
     private final ActivityLogService activityLogService;
@@ -40,7 +40,7 @@ public class TaskCommentService {
         Long taskId,
         TaskCommentCreateRequest request
     ) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireMember(workspaceId, projectId);
         Task task = taskService.findTaskInProject(workspaceId, projectId, taskId);
         User author = requireCurrentUserEntity();
 
@@ -67,7 +67,7 @@ public class TaskCommentService {
 
     @Transactional(readOnly = true)
     public List<TaskCommentResponse> getByTask(Long workspaceId, Long projectId, Long taskId) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireAccess(workspaceId, projectId);
         taskService.findTaskInProject(workspaceId, projectId, taskId);
         return taskCommentRepository.findByTaskIdOrderByCreatedAtAsc(taskId).stream()
             .map(taskCommentMapper::toResponse)
@@ -82,7 +82,7 @@ public class TaskCommentService {
         Long commentId,
         TaskCommentUpdateRequest request
     ) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireMember(workspaceId, projectId);
         taskService.findTaskInProject(workspaceId, projectId, taskId);
         TaskComment comment = requireComment(taskId, commentId);
         User currentUser = requireCurrentUserEntity();
@@ -97,7 +97,7 @@ public class TaskCommentService {
 
     @Transactional
     public void delete(Long workspaceId, Long projectId, Long taskId, Long commentId) {
-        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        projectAuthorizationService.requireMember(workspaceId, projectId);
         taskService.findTaskInProject(workspaceId, projectId, taskId);
         TaskComment comment = requireComment(taskId, commentId);
         User currentUser = requireCurrentUserEntity();
