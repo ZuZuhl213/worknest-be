@@ -24,10 +24,15 @@ import org.springframework.transaction.annotation.Transactional;
 import com.hoang.worknest.dto.auth.AuthResponse;
 import com.hoang.worknest.dto.auth.AuthUserResponse;
 import com.hoang.worknest.dto.auth.CurrentUserResponse;
+import com.hoang.worknest.dto.auth.ForgotPasswordRequest;
 import com.hoang.worknest.dto.auth.LoginRequest;
 import com.hoang.worknest.dto.auth.RegisterRequest;
+import com.hoang.worknest.dto.auth.ResetPasswordRequest;
+import com.hoang.worknest.dto.auth.VerifyEmailRequest;
+import com.hoang.worknest.entity.AccountToken;
 import com.hoang.worknest.entity.RefreshToken;
 import com.hoang.worknest.entity.User;
+import com.hoang.worknest.enums.AccountTokenType;
 import com.hoang.worknest.exception.ConflictException;
 import com.hoang.worknest.exception.InvalidRefreshTokenException;
 import com.hoang.worknest.exception.TooManyRequestsException;
@@ -53,9 +58,17 @@ public class AuthService {
     private final CurrentUserService currentUserService;
     private final RateLimitService rateLimitService;
     private final SecurityAuditService securityAuditService;
+    private final AccountTokenService accountTokenService;
+    private final AccountEmailSender accountEmailSender;
 
     @Value("${app.jwt.refresh-token-expiration}")
     private long refreshTokenExpirationMs;
+
+    @Value("${app.email.password-reset-token-expiration-ms}")
+    private long passwordResetTokenExpirationMs;
+
+    @Value("${app.email.verification-token-expiration-ms}")
+    private long emailVerificationTokenExpirationMs;
 
     public record AuthSession(AuthResponse response, String refreshToken, OffsetDateTime refreshExpiresAt) {
     }
@@ -77,6 +90,7 @@ public class AuthService {
             .emailVerified(Boolean.FALSE)
             .build());
         securityAuditService.log(savedUser, savedUser, "ACCOUNT_REGISTERED", "SUCCESS", Map.of());
+        sendVerificationEmail(savedUser);
         return issueNewFamily(savedUser);
     }
 
@@ -161,6 +175,44 @@ public class AuthService {
         });
     }
 
+    @Transactional(noRollbackFor = TooManyRequestsException.class)
+    public void forgotPassword(ForgotPasswordRequest request) {
+        String email = normalizeEmail(request.email());
+        rateLimitService.check("forgot-password-ip", securityAuditService.currentClientAddress(), 10, Duration.ofHours(1));
+        rateLimitService.check("forgot-password-account", email, 3, Duration.ofHours(1));
+        userRepository.findByEmailIgnoreCase(email).ifPresentOrElse(user -> {
+            String rawToken = accountTokenService.issue(
+                user,
+                AccountTokenType.PASSWORD_RESET,
+                Duration.ofMillis(passwordResetTokenExpirationMs)
+            );
+            accountEmailSender.sendPasswordReset(user, rawToken);
+            securityAuditService.log(user, user, "PASSWORD_RESET_REQUESTED", "SUCCESS", Map.of());
+        }, () -> securityAuditService.log(null, null, "PASSWORD_RESET_REQUESTED", "IGNORED", Map.of("emailHash", hash(email))));
+    }
+
+    @Transactional
+    public void resetPassword(ResetPasswordRequest request) {
+        rateLimitService.check("reset-password-ip", securityAuditService.currentClientAddress(), 20, Duration.ofHours(1));
+        AccountToken token = accountTokenService.consume(request.token(), AccountTokenType.PASSWORD_RESET);
+        User user = token.getUser();
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setTokenVersion(user.getTokenVersion() + 1);
+        userRepository.save(user);
+        revokeAllForUser(user.getId());
+        securityAuditService.log(user, user, "PASSWORD_RESET_COMPLETED", "SUCCESS", Map.of());
+    }
+
+    @Transactional
+    public void verifyEmail(VerifyEmailRequest request) {
+        rateLimitService.check("verify-email-ip", securityAuditService.currentClientAddress(), 30, Duration.ofHours(1));
+        AccountToken token = accountTokenService.consume(request.token(), AccountTokenType.EMAIL_VERIFICATION);
+        User user = token.getUser();
+        user.setEmailVerified(Boolean.TRUE);
+        userRepository.save(user);
+        securityAuditService.log(user, user, "EMAIL_VERIFIED", "SUCCESS", Map.of());
+    }
+
     @Transactional(readOnly = true)
     public CurrentUserResponse getCurrentUser() {
         AuthenticatedUser currentUser = currentUserService.getCurrentUser();
@@ -189,6 +241,15 @@ public class AuthService {
             .expiresAt(expiresAt)
             .build());
         return new AuthSession(buildAuthResponse(user), rawToken, expiresAt);
+    }
+
+    private void sendVerificationEmail(User user) {
+        String rawToken = accountTokenService.issue(
+            user,
+            AccountTokenType.EMAIL_VERIFICATION,
+            Duration.ofMillis(emailVerificationTokenExpirationMs)
+        );
+        accountEmailSender.sendEmailVerification(user, rawToken);
     }
 
     private AuthResponse buildAuthResponse(User user) {

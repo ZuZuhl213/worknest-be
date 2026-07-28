@@ -4,7 +4,7 @@ import org.springframework.stereotype.Service;
 
 import com.hoang.worknest.entity.Workspace;
 import com.hoang.worknest.entity.WorkspaceMember;
-import com.hoang.worknest.enums.Role;
+import com.hoang.worknest.enums.WorkspaceRole;
 import com.hoang.worknest.exception.ForbiddenException;
 import com.hoang.worknest.exception.ResourceNotFoundException;
 import com.hoang.worknest.repository.WorkspaceMemberRepository;
@@ -37,7 +37,7 @@ public class WorkspaceAccessService {
 
         WorkspaceMember membership = requireCurrentUserMembership(workspaceId);
 
-        if (membership.getRole() != Role.OWNER && membership.getRole() != Role.ADMIN) {
+        if (membership.getRole() != WorkspaceRole.OWNER && membership.getRole() != WorkspaceRole.ADMIN) {
             throw new ForbiddenException("You do not have permission to manage this workspace");
         }
 
@@ -49,7 +49,7 @@ public class WorkspaceAccessService {
             .orElseThrow(() -> new ResourceNotFoundException("Workspace not found"));
 
         WorkspaceMember membership = requireCurrentUserMembership(workspaceId);
-        if (membership.getRole() != Role.OWNER) {
+        if (membership.getRole() != WorkspaceRole.OWNER) {
             throw new ForbiddenException("Only workspace owner can perform this action");
         }
 

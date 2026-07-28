@@ -1,8 +1,8 @@
 package com.hoang.worknest.dto.workspace;
 
-import com.hoang.worknest.enums.Role;
+import com.hoang.worknest.enums.WorkspaceRole;
 
 import jakarta.validation.constraints.NotNull;
 
-public record WorkspaceChangeMemberRoleRequest(@NotNull Role role) {
+public record WorkspaceChangeMemberRoleRequest(@NotNull WorkspaceRole role) {
 }

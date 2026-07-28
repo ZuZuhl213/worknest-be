@@ -1,12 +1,14 @@
 package com.hoang.worknest.service;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.Map;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.hoang.worknest.dto.common.PagedResponse;
 import com.hoang.worknest.dto.project.ProjectAddMemberRequest;
 import com.hoang.worknest.dto.project.ProjectChangeMemberRoleRequest;
 import com.hoang.worknest.dto.project.ProjectMemberResponse;
@@ -56,11 +58,21 @@ public class ProjectMemberService {
     }
 
     @Transactional(readOnly = true)
-    public List<ProjectMemberResponse> getMembers(Long workspaceId, Long projectId) {
+    public PagedResponse<ProjectMemberResponse> getMembers(Long workspaceId, Long projectId, int page, int size) {
         projectAuthorizationService.requireAccess(workspaceId, projectId);
-        return projectMemberRepository.findByProjectId(projectId).stream()
-            .map(this::toResponse)
-            .toList();
+        Page<ProjectMember> members = projectMemberRepository.findByProjectId(
+            projectId,
+            PageRequest.of(validatePage(page), validateSize(size))
+        );
+        return new PagedResponse<>(
+            members.getContent().stream().map(this::toResponse).toList(),
+            members.getNumber(),
+            members.getSize(),
+            members.getTotalElements(),
+            members.getTotalPages(),
+            members.isFirst(),
+            members.isLast()
+        );
     }
 
     @Transactional
@@ -155,5 +167,19 @@ public class ProjectMemberService {
             member.getJoinedAt(),
             member.getCreatedAt()
         );
+    }
+
+    private int validatePage(int page) {
+        if (page < 0) {
+            throw new IllegalArgumentException("Page index must not be negative");
+        }
+        return page;
+    }
+
+    private int validateSize(int size) {
+        if (size < 1 || size > 100) {
+            throw new IllegalArgumentException("Page size must be between 1 and 100");
+        }
+        return size;
     }
 }

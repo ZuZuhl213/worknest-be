@@ -1,10 +1,13 @@
 package com.hoang.worknest.service;
 
-import java.util.List;
+import java.util.Map;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.hoang.worknest.dto.common.PagedResponse;
 import com.hoang.worknest.dto.notification.comment.TaskCommentCreateRequest;
 import com.hoang.worknest.dto.notification.comment.TaskCommentResponse;
 import com.hoang.worknest.dto.notification.comment.TaskCommentUpdateRequest;
@@ -59,19 +62,35 @@ public class TaskCommentService {
             "TASK_COMMENT_CREATED",
             "TASK_COMMENT",
             savedComment.getId(),
-            "{\"taskId\":" + task.getId() + "}"
+            Map.of("taskId", task.getId())
         );
 
         return taskCommentMapper.toResponse(savedComment);
     }
 
     @Transactional(readOnly = true)
-    public List<TaskCommentResponse> getByTask(Long workspaceId, Long projectId, Long taskId) {
+    public PagedResponse<TaskCommentResponse> getByTask(
+        Long workspaceId,
+        Long projectId,
+        Long taskId,
+        int page,
+        int size
+    ) {
         projectAuthorizationService.requireAccess(workspaceId, projectId);
         taskService.findTaskInProject(workspaceId, projectId, taskId);
-        return taskCommentRepository.findByTaskIdOrderByCreatedAtAsc(taskId).stream()
-            .map(taskCommentMapper::toResponse)
-            .toList();
+        Page<TaskComment> comments = taskCommentRepository.findByTaskIdOrderByCreatedAtAsc(
+            taskId,
+            PageRequest.of(validatePage(page), validateSize(size))
+        );
+        return new PagedResponse<>(
+            comments.getContent().stream().map(taskCommentMapper::toResponse).toList(),
+            comments.getNumber(),
+            comments.getSize(),
+            comments.getTotalElements(),
+            comments.getTotalPages(),
+            comments.isFirst(),
+            comments.isLast()
+        );
     }
 
     @Transactional
@@ -119,5 +138,19 @@ public class TaskCommentService {
         Long userId = currentUserService.getCurrentUser().id();
         return userRepository.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
+    }
+
+    private int validatePage(int page) {
+        if (page < 0) {
+            throw new IllegalArgumentException("Page index must not be negative");
+        }
+        return page;
+    }
+
+    private int validateSize(int size) {
+        if (size < 1 || size > 100) {
+            throw new IllegalArgumentException("Page size must be between 1 and 100");
+        }
+        return size;
     }
 }

@@ -112,6 +112,10 @@ public class FileStorageService {
         return bucketName;
     }
 
+    public void deleteObject(String objectKey) {
+        s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucketName).key(objectKey).build());
+    }
+
     private String quarantineScanAndPromote(
         byte[] bytes,
         String contentType,

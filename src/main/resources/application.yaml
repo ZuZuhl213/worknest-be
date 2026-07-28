@@ -29,11 +29,7 @@ spring:
 
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
-      ssl:
-        enabled: ${REDIS_SSL_ENABLED:false}
+      url: ${REDIS_URL:redis://localhost:6379}
 
   servlet:
     multipart:
@@ -53,8 +49,20 @@ spring:
           threadPool:
             threadCount: 3
 
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SMTP_AUTH:false}
+          starttls:
+            enable: ${SMTP_STARTTLS:false}
+
 server:
-  port: ${PORT:8080}
+  port: ${SERVER_PORT:${PORT:8000}}
   forward-headers-strategy: framework
 
 aws:
@@ -66,6 +74,7 @@ aws:
     bucket-name: ${S3_BUCKET_NAME:}
 
 app:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
   jwt:
     secret: ${JWT_SECRET}
     issuer: ${JWT_ISSUER:worknest}
@@ -74,6 +83,11 @@ app:
     refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION:604800000}
   auth:
     cookie-secure: ${AUTH_COOKIE_SECURE:false}
+  email:
+    enabled: ${EMAIL_ENABLED:false}
+    from: ${EMAIL_FROM:no-reply@worknest.local}
+    password-reset-token-expiration-ms: ${PASSWORD_RESET_TOKEN_EXPIRATION:3600000}
+    verification-token-expiration-ms: ${EMAIL_VERIFICATION_TOKEN_EXPIRATION:86400000}
   scheduler:
     overdue-task:
       interval-ms: ${OVERDUE_TASK_INTERVAL_MS:300000}

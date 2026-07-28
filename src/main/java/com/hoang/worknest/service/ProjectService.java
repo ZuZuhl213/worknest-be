@@ -1,21 +1,28 @@
 package com.hoang.worknest.service;
 
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.hoang.worknest.config.CacheConfig;
 import com.hoang.worknest.dto.project.ProjectCreateRequest;
+import com.hoang.worknest.dto.project.ProjectPermissionsResponse;
 import com.hoang.worknest.dto.project.ProjectResponse;
 import com.hoang.worknest.dto.project.ProjectUpdateRequest;
 import com.hoang.worknest.entity.Project;
+import com.hoang.worknest.entity.ProjectMember;
 import com.hoang.worknest.entity.User;
 import com.hoang.worknest.entity.Workspace;
+import com.hoang.worknest.enums.ProjectRole;
 import com.hoang.worknest.exception.ConflictException;
 import com.hoang.worknest.exception.ResourceNotFoundException;
 import com.hoang.worknest.mapper.ProjectMapper;
+import com.hoang.worknest.repository.ProjectMemberRepository;
 import com.hoang.worknest.repository.ProjectRepository;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.security.AuthenticatedUser;
@@ -30,6 +37,7 @@ import lombok.RequiredArgsConstructor;
 public class ProjectService {
 
     private final ProjectRepository projectRepository;
+    private final ProjectMemberRepository projectMemberRepository;
     private final ProjectMapper projectMapper;
     private final WorkspaceAccessService workspaceAccessService;
     private final CurrentUserService currentUserService;
@@ -38,7 +46,7 @@ public class ProjectService {
     private final ProjectAuthorizationService projectAuthorizationService;
 
     @Transactional
-    @CacheEvict(cacheNames = CacheConfig.PROJECTS_BY_WORKSPACE, allEntries = true)
+    @CacheEvict(cacheNames = CacheConfig.PROJECTS_BY_WORKSPACE, key = "#workspaceId")
     public ProjectResponse create(Long workspaceId, ProjectCreateRequest request) {
         Workspace workspace = workspaceAccessService.requireWorkspaceAdmin(workspaceId);
         String normalizedProjectKey = normalizeProjectKey(request.projectKey());
@@ -54,6 +62,17 @@ public class ProjectService {
         project.setCreatedBy(creator);
 
         Project savedProject = projectRepository.save(project);
+
+        // The creator becomes the project LEAD so every project always has an owner
+        // and the "at least one LEAD" invariant holds from the moment it is created.
+        projectMemberRepository.save(ProjectMember.builder()
+            .project(savedProject)
+            .user(creator)
+            .role(ProjectRole.LEAD)
+            .addedBy(creator)
+            .joinedAt(OffsetDateTime.now())
+            .build());
+
         activityLogService.log(
             workspace,
             savedProject,
@@ -62,10 +81,10 @@ public class ProjectService {
             "PROJECT_CREATED",
             "PROJECT",
             savedProject.getId(),
-            "{\"projectKey\":\"" + savedProject.getProjectKey() + "\"}"
+            Map.of("projectKey", savedProject.getProjectKey())
         );
 
-        return projectMapper.toResponse(savedProject);
+        return toResponse(savedProject, projectAuthorizationService.resolvePermissions(savedProject));
     }
 
     @Transactional(readOnly = true)
@@ -75,26 +94,24 @@ public class ProjectService {
         List<Project> projects = projectAuthorizationService.isWorkspaceAdmin(workspaceId)
             ? projectRepository.findByWorkspaceId(workspaceId)
             : projectRepository.findAccessibleByWorkspaceAndUser(workspaceId, currentUser.id());
+        Map<Long, ProjectAuthorizationService.ProjectPermissions> permissionsByProject =
+            projectAuthorizationService.resolvePermissions(workspaceId, projects);
         return projects.stream()
-            .map(projectMapper::toResponse)
+            .map(project -> toResponse(project, permissionsByProject.get(project.getId())))
             .toList();
     }
 
     @Transactional(readOnly = true)
     public ProjectResponse getById(Long workspaceId, Long projectId) {
-        return projectMapper.toResponse(projectAuthorizationService.requireAccess(workspaceId, projectId));
+        Project project = projectAuthorizationService.requireAccess(workspaceId, projectId);
+        return toResponse(project, projectAuthorizationService.resolvePermissions(project));
     }
 
     @Transactional
-    @CacheEvict(
-        cacheNames = {
-            CacheConfig.PROJECTS_BY_WORKSPACE,
-            CacheConfig.PROJECT_DETAIL,
-            CacheConfig.TASKS_BY_PROJECT,
-            CacheConfig.TASK_DETAIL
-        },
-        allEntries = true
-    )
+    @Caching(evict = {
+        @CacheEvict(cacheNames = CacheConfig.PROJECTS_BY_WORKSPACE, key = "#workspaceId"),
+        @CacheEvict(cacheNames = CacheConfig.PROJECT_DETAIL, key = "#projectId")
+    })
     public ProjectResponse update(Long workspaceId, Long projectId, ProjectUpdateRequest request) {
         Project project = projectAuthorizationService.requireLead(workspaceId, projectId);
         Workspace workspace = project.getWorkspace();
@@ -115,22 +132,18 @@ public class ProjectService {
             "PROJECT_UPDATED",
             "PROJECT",
             savedProject.getId(),
-            "{\"projectKey\":\"" + savedProject.getProjectKey() + "\"}"
+            Map.of("projectKey", savedProject.getProjectKey())
         );
 
-        return projectMapper.toResponse(savedProject);
+        return toResponse(savedProject, projectAuthorizationService.resolvePermissions(savedProject));
     }
 
     @Transactional
-    @CacheEvict(
-        cacheNames = {
-            CacheConfig.PROJECTS_BY_WORKSPACE,
-            CacheConfig.PROJECT_DETAIL,
-            CacheConfig.TASKS_BY_PROJECT,
-            CacheConfig.TASK_DETAIL
-        },
-        allEntries = true
-    )
+    @Caching(evict = {
+        @CacheEvict(cacheNames = CacheConfig.PROJECTS_BY_WORKSPACE, key = "#workspaceId"),
+        @CacheEvict(cacheNames = CacheConfig.PROJECT_DETAIL, key = "#projectId"),
+        @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, key = "#projectId")
+    })
     public void delete(Long workspaceId, Long projectId) {
         Project project = projectAuthorizationService.requireLead(workspaceId, projectId);
         Workspace workspace = project.getWorkspace();
@@ -145,7 +158,7 @@ public class ProjectService {
             "PROJECT_DELETED",
             "PROJECT",
             project.getId(),
-            "{\"projectKey\":\"" + project.getProjectKey() + "\"}"
+            Map.of("projectKey", project.getProjectKey())
         );
         projectRepository.delete(project);
     }
@@ -166,5 +179,20 @@ public class ProjectService {
 
     private String normalizeProjectKey(String projectKey) {
         return projectKey == null ? null : projectKey.trim().toUpperCase();
+    }
+
+    private ProjectResponse toResponse(
+        Project project,
+        ProjectAuthorizationService.ProjectPermissions permissions
+    ) {
+        ProjectPermissionsResponse permissionsResponse = new ProjectPermissionsResponse(
+            permissions.canViewProject(),
+            permissions.canCreateTask(),
+            permissions.canAssignTask(),
+            permissions.canComment(),
+            permissions.canManageProject(),
+            permissions.canManageMembers()
+        );
+        return projectMapper.toResponse(project, permissions.effectiveRole(), permissionsResponse);
     }
 }

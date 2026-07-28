@@ -3,12 +3,19 @@ package com.hoang.worknest.service;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.hoang.worknest.config.CacheConfig;
+import com.hoang.worknest.dto.common.PagedResponse;
+import com.hoang.worknest.dto.task.TaskUserResponse;
+import com.hoang.worknest.dto.task.WorkspaceTaskResponse;
 import com.hoang.worknest.dto.workspace.WorkspaceChangeMemberRoleRequest;
 import com.hoang.worknest.dto.workspace.WorkspaceCreateRequest;
 import com.hoang.worknest.dto.workspace.WorkspaceInviteMemberRequest;
@@ -18,7 +25,8 @@ import com.hoang.worknest.dto.workspace.WorkspaceUpdateRequest;
 import com.hoang.worknest.entity.User;
 import com.hoang.worknest.entity.Workspace;
 import com.hoang.worknest.entity.WorkspaceMember;
-import com.hoang.worknest.enums.Role;
+import com.hoang.worknest.entity.Task;
+import com.hoang.worknest.enums.WorkspaceRole;
 import com.hoang.worknest.enums.ProjectRole;
 import com.hoang.worknest.exception.ConflictException;
 import com.hoang.worknest.exception.ForbiddenException;
@@ -29,6 +37,8 @@ import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.repository.WorkspaceMemberRepository;
 import com.hoang.worknest.repository.WorkspaceRepository;
 import com.hoang.worknest.repository.ProjectMemberRepository;
+import com.hoang.worknest.repository.TaskRepository;
+import com.hoang.worknest.repository.specification.TaskSpecifications;
 import com.hoang.worknest.security.AuthenticatedUser;
 import com.hoang.worknest.security.CurrentUserService;
 import com.hoang.worknest.security.WorkspaceAccessService;
@@ -49,6 +59,12 @@ public class WorkspaceService {
     private final ActivityLogService activityLogService;
     private final ProjectMemberRepository projectMemberRepository;
     private final SecurityAuditService securityAuditService;
+    private final TaskRepository taskRepository;
+
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final Set<String> ALLOWED_TASK_SORT_FIELDS = Set.of(
+        "createdAt", "updatedAt", "dueDate", "priority", "status", "taskNumber", "title"
+    );
 
     @Transactional
     @CacheEvict(
@@ -74,7 +90,7 @@ public class WorkspaceService {
         WorkspaceMember ownerMembership = WorkspaceMember.builder()
             .workspace(savedWorkspace)
             .user(owner)
-            .role(Role.OWNER)
+            .role(WorkspaceRole.OWNER)
             .joinedAt(OffsetDateTime.now())
             .invitedBy(owner)
             .build();
@@ -87,7 +103,7 @@ public class WorkspaceService {
             "WORKSPACE_CREATED",
             "WORKSPACE",
             savedWorkspace.getId(),
-            "{\"slug\":\"" + savedWorkspace.getSlug() + "\"}"
+            Map.of("slug", savedWorkspace.getSlug())
         );
 
         return workspaceMapper.toResponse(savedWorkspace);
@@ -137,7 +153,7 @@ public class WorkspaceService {
             "WORKSPACE_UPDATED",
             "WORKSPACE",
             savedWorkspace.getId(),
-            "{\"slug\":\"" + savedWorkspace.getSlug() + "\"}"
+            Map.of("slug", savedWorkspace.getSlug())
         );
         return workspaceMapper.toResponse(savedWorkspace);
     }
@@ -161,11 +177,62 @@ public class WorkspaceService {
     }
 
     @Transactional(readOnly = true)
-    public List<WorkspaceMemberResponse> getMembers(Long workspaceId) {
+    public PagedResponse<WorkspaceMemberResponse> getMembers(Long workspaceId, int page, int size) {
         workspaceAccessService.requireWorkspaceMember(workspaceId);
-        return workspaceMemberRepository.findByWorkspaceId(workspaceId).stream()
-            .map(workspaceMemberMapper::toResponse)
-            .toList();
+        Page<WorkspaceMember> members = workspaceMemberRepository.findByWorkspaceId(
+            workspaceId,
+            PageRequest.of(validatePage(page), validateSize(size))
+        );
+        return new PagedResponse<>(
+            members.getContent().stream().map(workspaceMemberMapper::toResponse).toList(),
+            members.getNumber(),
+            members.getSize(),
+            members.getTotalElements(),
+            members.getTotalPages(),
+            members.isFirst(),
+            members.isLast()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<WorkspaceTaskResponse> getTasks(
+        Long workspaceId,
+        Long assigneeId,
+        int page,
+        int size,
+        String sortBy,
+        String sortDirection
+    ) {
+        workspaceAccessService.requireWorkspaceMember(workspaceId);
+        validateTaskSort(sortBy);
+        Long currentUserId = currentUserService.getCurrentUser().id();
+        WorkspaceMember currentMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
+        boolean workspaceAdmin = currentMembership.getRole() == WorkspaceRole.OWNER || currentMembership.getRole() == WorkspaceRole.ADMIN;
+        List<Long> accessibleProjectIds = workspaceAdmin
+            ? null
+            : projectMemberRepository.findByProjectWorkspaceIdAndUserId(workspaceId, currentUserId).stream()
+                .map(member -> member.getProject().getId())
+                .toList();
+        if (accessibleProjectIds != null && accessibleProjectIds.isEmpty()) {
+            return new PagedResponse<>(List.of(), validatePage(page), validateSize(size), 0, 0, true, true);
+        }
+
+        Sort sort = Sort.by(Sort.Direction.fromString(sortDirection), sortBy);
+        Page<Task> tasks = taskRepository.findAll(
+            org.springframework.data.jpa.domain.Specification.where(TaskSpecifications.belongsToWorkspace(workspaceId))
+                .and(accessibleProjectIds == null ? null : TaskSpecifications.projectIn(accessibleProjectIds))
+                .and(TaskSpecifications.hasAssignee(assigneeId)),
+            PageRequest.of(validatePage(page), validateSize(size), sort)
+        );
+        return new PagedResponse<>(
+            tasks.getContent().stream().map(this::toWorkspaceTaskResponse).toList(),
+            tasks.getNumber(),
+            tasks.getSize(),
+            tasks.getTotalElements(),
+            tasks.getTotalPages(),
+            tasks.isFirst(),
+            tasks.isLast()
+        );
     }
 
     @Transactional
@@ -182,7 +249,7 @@ public class WorkspaceService {
         User invitedUser = userRepository.findByEmailIgnoreCase(request.email().trim().toLowerCase(java.util.Locale.ROOT))
             .orElseThrow(() -> new ResourceNotFoundException("User to invite not found"));
 
-        if (request.role() == Role.OWNER) {
+        if (request.role() == WorkspaceRole.OWNER) {
             throw new ForbiddenException("Owner role cannot be assigned through invite");
         }
 
@@ -209,7 +276,7 @@ public class WorkspaceService {
             "WORKSPACE_MEMBER_INVITED",
             "WORKSPACE_MEMBER",
             savedMember.getId(),
-            "{\"userId\":" + invitedUser.getId() + ",\"role\":\"" + savedMember.getRole() + "\"}"
+            Map.of("userId", invitedUser.getId(), "role", savedMember.getRole().name())
         );
 
         return workspaceMemberMapper.toResponse(savedMember);
@@ -227,14 +294,14 @@ public class WorkspaceService {
         WorkspaceMember member = getWorkspaceMember(workspaceId, memberId);
         WorkspaceMember actorMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
 
-        if (member.getRole() == Role.OWNER) {
+        if (member.getRole() == WorkspaceRole.OWNER) {
             throw new ForbiddenException("Owner role cannot be changed");
         }
-        if (request.role() == Role.OWNER) {
+        if (request.role() == WorkspaceRole.OWNER) {
             throw new ForbiddenException("Owner transfer is not supported by this endpoint");
         }
         // ADMIN cannot change the role of another ADMIN (only OWNER can)
-        if (actorMembership.getRole() == Role.ADMIN && member.getRole() == Role.ADMIN) {
+        if (actorMembership.getRole() == WorkspaceRole.ADMIN && member.getRole() == WorkspaceRole.ADMIN) {
             throw new ForbiddenException("Admins cannot change the role of other admins");
         }
 
@@ -250,7 +317,7 @@ public class WorkspaceService {
             "WORKSPACE_MEMBER_ROLE_CHANGED",
             "WORKSPACE_MEMBER",
             savedMember.getId(),
-            "{\"userId\":" + savedMember.getUser().getId() + ",\"role\":\"" + savedMember.getRole() + "\"}"
+            Map.of("userId", savedMember.getUser().getId(), "role", savedMember.getRole().name())
         );
 
         return workspaceMemberMapper.toResponse(savedMember);
@@ -270,11 +337,11 @@ public class WorkspaceService {
         WorkspaceMember member = getWorkspaceMember(workspaceId, memberId);
         WorkspaceMember actorMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
 
-        if (member.getRole() == Role.OWNER) {
+        if (member.getRole() == WorkspaceRole.OWNER) {
             throw new ForbiddenException("Workspace owner cannot be removed");
         }
         // ADMIN cannot remove another ADMIN (only OWNER can)
-        if (actorMembership.getRole() == Role.ADMIN && member.getRole() == Role.ADMIN) {
+        if (actorMembership.getRole() == WorkspaceRole.ADMIN && member.getRole() == WorkspaceRole.ADMIN) {
             throw new ForbiddenException("Admins cannot remove other admins");
         }
 
@@ -291,7 +358,7 @@ public class WorkspaceService {
             "WORKSPACE_MEMBER_REMOVED",
             "WORKSPACE_MEMBER",
             member.getId(),
-            "{\"userId\":" + member.getUser().getId() + "}"
+            Map.of("userId", member.getUser().getId())
         );
     }
 
@@ -325,5 +392,53 @@ public class WorkspaceService {
         Long currentUserId = currentUserService.getCurrentUser().id();
         return userRepository.findById(currentUserId)
             .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
+    }
+
+    private WorkspaceTaskResponse toWorkspaceTaskResponse(Task task) {
+        return new WorkspaceTaskResponse(
+            task.getId(),
+            task.getProject().getId(),
+            task.getProject().getName(),
+            task.getProject().getProjectKey(),
+            task.getTaskNumber(),
+            task.getTitle(),
+            task.getDescription(),
+            task.getStatus(),
+            task.getPriority(),
+            toTaskUserResponse(task.getAssignee()),
+            toTaskUserResponse(task.getReporter()),
+            task.getDueDate(),
+            task.getStartedAt(),
+            task.getCompletedAt(),
+            task.getCreatedAt(),
+            task.getUpdatedAt()
+        );
+    }
+
+    private TaskUserResponse toTaskUserResponse(User user) {
+        if (user == null) {
+            return null;
+        }
+        return new TaskUserResponse(user.getId(), user.getEmail(), user.getFullName());
+    }
+
+    private int validatePage(int page) {
+        if (page < 0) {
+            throw new IllegalArgumentException("Page index must not be negative");
+        }
+        return page;
+    }
+
+    private int validateSize(int size) {
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new IllegalArgumentException("Page size must be between 1 and " + MAX_PAGE_SIZE);
+        }
+        return size;
+    }
+
+    private void validateTaskSort(String sortBy) {
+        if (!ALLOWED_TASK_SORT_FIELDS.contains(sortBy)) {
+            throw new IllegalArgumentException("Unsupported task sort field: " + sortBy);
+        }
     }
 }

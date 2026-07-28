@@ -5,15 +5,23 @@ import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
 
 import com.hoang.worknest.dto.project.ProjectCreateRequest;
+import com.hoang.worknest.dto.project.ProjectPermissionsResponse;
 import com.hoang.worknest.dto.project.ProjectResponse;
 import com.hoang.worknest.dto.project.ProjectUpdateRequest;
 import com.hoang.worknest.entity.Project;
+import com.hoang.worknest.enums.ProjectRole;
 
 @Mapper(componentModel = "spring")
 public interface ProjectMapper {
 
-    @Mapping(target = "workspaceId", source = "workspace.id")
-    ProjectResponse toResponse(Project project);
+    @Mapping(target = "workspaceId", source = "project.workspace.id")
+    @Mapping(target = "myRole", source = "myRole")
+    @Mapping(target = "permissions", source = "permissions")
+    ProjectResponse toResponse(
+        Project project,
+        ProjectRole myRole,
+        ProjectPermissionsResponse permissions
+    );
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "workspace", ignore = true)

@@ -2,6 +2,7 @@ package com.hoang.worknest.scheduler;
 
 import org.quartz.JobExecutionContext;
 import org.quartz.JobExecutionException;
+import org.springframework.lang.NonNull;
 import org.springframework.scheduling.quartz.QuartzJobBean;
 import org.springframework.stereotype.Component;
 
@@ -16,7 +17,7 @@ public class OverdueTaskJob extends QuartzJobBean {
     private final OverdueTaskService overdueTaskService;
 
     @Override
-    protected void executeInternal(JobExecutionContext context) throws JobExecutionException {
+    protected void executeInternal(@NonNull JobExecutionContext context) throws JobExecutionException {
         overdueTaskService.notifyOverdueTasks();
     }
 }

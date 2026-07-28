@@ -12,8 +12,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.hoang.worknest.dto.common.PagedResponse;
+import com.hoang.worknest.dto.task.WorkspaceTaskResponse;
 import com.hoang.worknest.dto.workspace.WorkspaceChangeMemberRoleRequest;
 import com.hoang.worknest.dto.workspace.WorkspaceCreateRequest;
 import com.hoang.worknest.dto.workspace.WorkspaceInviteMemberRequest;
@@ -62,8 +65,24 @@ public class WorkspaceController {
     }
 
     @GetMapping("/{id}/members")
-    public ResponseEntity<List<WorkspaceMemberResponse>> getMembers(@PathVariable Long id) {
-        return ResponseEntity.ok(workspaceService.getMembers(id));
+    public ResponseEntity<PagedResponse<WorkspaceMemberResponse>> getMembers(
+        @PathVariable Long id,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(workspaceService.getMembers(id, page, size));
+    }
+
+    @GetMapping("/{id}/tasks")
+    public ResponseEntity<PagedResponse<WorkspaceTaskResponse>> getTasks(
+        @PathVariable Long id,
+        @RequestParam(required = false) Long assigneeId,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size,
+        @RequestParam(defaultValue = "createdAt") String sortBy,
+        @RequestParam(defaultValue = "DESC") String sortDirection
+    ) {
+        return ResponseEntity.ok(workspaceService.getTasks(id, assigneeId, page, size, sortBy, sortDirection));
     }
 
     @PostMapping("/{id}/members")

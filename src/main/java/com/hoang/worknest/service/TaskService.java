@@ -4,9 +4,11 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,6 +32,7 @@ import com.hoang.worknest.entity.User;
 import com.hoang.worknest.enums.TaskPriority;
 import com.hoang.worknest.enums.TaskStatus;
 import com.hoang.worknest.exception.ResourceNotFoundException;
+import com.hoang.worknest.exception.ServiceUnavailableException;
 import com.hoang.worknest.mapper.TaskMapper;
 import com.hoang.worknest.mapper.UserMapper;
 import com.hoang.worknest.repository.AttachmentRepository;
@@ -64,7 +67,7 @@ public class TaskService {
     private final ProjectAuthorizationService projectAuthorizationService;
 
     @Transactional
-    @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, allEntries = true)
+    @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, key = "#projectId")
     public TaskResponse create(Long workspaceId, Long projectId, TaskCreateRequest request) {
         Project project = projectAuthorizationService.requireMember(workspaceId, projectId);
         User reporter = requireCurrentUserEntity();
@@ -93,7 +96,7 @@ public class TaskService {
             "TASK_CREATED",
             "TASK",
             savedTask.getId(),
-            "{\"status\":\"" + savedTask.getStatus() + "\"}"
+            Map.of("status", savedTask.getStatus().name())
         );
         return taskMapper.toResponse(savedTask);
     }
@@ -146,16 +149,13 @@ public class TaskService {
     }
 
     @Transactional
-    @CacheEvict(
-        cacheNames = {
-            CacheConfig.TASKS_BY_PROJECT,
-            CacheConfig.TASK_DETAIL
-        },
-        allEntries = true
-    )
+    @Caching(evict = {
+        @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, key = "#projectId"),
+        @CacheEvict(cacheNames = CacheConfig.TASK_DETAIL, key = "#taskId")
+    })
     public TaskResponse update(Long workspaceId, Long projectId, Long taskId, TaskUpdateRequest request) {
-        projectAuthorizationService.requireMember(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
+        projectAuthorizationService.requireTaskWriter(workspaceId, projectId, task);
         User actor = requireCurrentUserEntity();
         Long oldAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
         if (!java.util.Objects.equals(oldAssigneeId, request.assigneeUserId())) {
@@ -179,19 +179,19 @@ public class TaskService {
             "TASK_UPDATED",
             "TASK",
             savedTask.getId(),
-            "{\"status\":\"" + savedTask.getStatus() + "\",\"priority\":\"" + savedTask.getPriority() + "\"}"
+            Map.of(
+                "status", savedTask.getStatus().name(),
+                "priority", savedTask.getPriority().name()
+            )
         );
         return taskMapper.toResponse(savedTask);
     }
 
     @Transactional
-    @CacheEvict(
-        cacheNames = {
-            CacheConfig.TASKS_BY_PROJECT,
-            CacheConfig.TASK_DETAIL
-        },
-        allEntries = true
-    )
+    @Caching(evict = {
+        @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, key = "#projectId"),
+        @CacheEvict(cacheNames = CacheConfig.TASK_DETAIL, key = "#taskId")
+    })
     public TaskResponse assign(Long workspaceId, Long projectId, Long taskId, TaskAssignRequest request) {
         projectAuthorizationService.requireLead(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
@@ -212,19 +212,16 @@ public class TaskService {
             "TASK_ASSIGNED",
             "TASK",
             savedTask.getId(),
-            "{\"assigneeUserId\":" + assignee.getId() + "}"
+            Map.of("assigneeUserId", assignee.getId())
         );
         return taskMapper.toResponse(savedTask);
     }
 
     @Transactional
-    @CacheEvict(
-        cacheNames = {
-            CacheConfig.TASKS_BY_PROJECT,
-            CacheConfig.TASK_DETAIL
-        },
-        allEntries = true
-    )
+    @Caching(evict = {
+        @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, key = "#projectId"),
+        @CacheEvict(cacheNames = CacheConfig.TASK_DETAIL, key = "#taskId")
+    })
     public void delete(Long workspaceId, Long projectId, Long taskId) {
         projectAuthorizationService.requireAccess(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
@@ -241,13 +238,14 @@ public class TaskService {
         activityLogService.log(
             task.getProject().getWorkspace(),
             task.getProject(),
-            task,
+            null,
             currentUser,
             "TASK_DELETED",
             "TASK",
             task.getId(),
-            "{\"title\":\"" + task.getTitle() + "\"}"
+            Map.of("title", task.getTitle())
         );
+        deleteAttachmentsForTask(taskId);
         taskRepository.delete(task);
     }
 
@@ -306,7 +304,7 @@ public class TaskService {
         
         Long workspaceId = task.getProject().getWorkspace().getId();
         Long projectId = task.getProject().getId();
-        projectAuthorizationService.requireMember(workspaceId, projectId);
+        projectAuthorizationService.requireTaskWriter(workspaceId, projectId, task);
         
         User uploader = requireCurrentUserEntity();
         
@@ -336,7 +334,7 @@ public class TaskService {
                 attachment.getCreatedAt()
             );
         } catch (IOException e) {
-            throw new RuntimeException("Failed to upload attachment", e);
+            throw new ServiceUnavailableException("Failed to upload attachment", e);
         }
     }
 
@@ -363,11 +361,34 @@ public class TaskService {
         }).toList();
     }
 
+    @Transactional
+    public void deleteAttachment(Long taskId, Long attachmentId) {
+        Task task = taskRepository.findById(taskId)
+            .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        Long workspaceId = task.getProject().getWorkspace().getId();
+        Long projectId = task.getProject().getId();
+        projectAuthorizationService.requireTaskWriter(workspaceId, projectId, task);
+
+        Attachment attachment = attachmentRepository.findByIdAndTaskId(attachmentId, taskId)
+            .orElseThrow(() -> new ResourceNotFoundException("Attachment not found"));
+        fileStorageService.deleteObject(attachment.getObjectKey());
+        attachmentRepository.delete(attachment);
+    }
+
     private String safeDisplayName(String originalFilename) {
         String name = originalFilename == null ? "attachment" : originalFilename;
         name = name.replace('\\', '/');
         name = name.substring(name.lastIndexOf('/') + 1).replaceAll("[\\r\\n\\u0000]", "").trim();
         if (name.isBlank()) return "attachment";
         return name.length() > 255 ? name.substring(name.length() - 255) : name;
+    }
+
+    private void deleteAttachmentsForTask(Long taskId) {
+        List<Attachment> attachments = attachmentRepository.findByTaskId(taskId);
+        for (Attachment attachment : attachments) {
+            fileStorageService.deleteObject(attachment.getObjectKey());
+        }
+        attachmentRepository.deleteAll(attachments);
     }
 }

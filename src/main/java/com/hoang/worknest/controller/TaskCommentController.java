@@ -1,7 +1,5 @@
 package com.hoang.worknest.controller;
 
-import java.util.List;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -11,8 +9,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.hoang.worknest.dto.common.PagedResponse;
 import com.hoang.worknest.dto.notification.comment.TaskCommentCreateRequest;
 import com.hoang.worknest.dto.notification.comment.TaskCommentResponse;
 import com.hoang.worknest.dto.notification.comment.TaskCommentUpdateRequest;
@@ -40,12 +40,14 @@ public class TaskCommentController {
     }
 
     @GetMapping
-    public ResponseEntity<List<TaskCommentResponse>> getByTask(
+    public ResponseEntity<PagedResponse<TaskCommentResponse>> getByTask(
         @PathVariable Long workspaceId,
         @PathVariable Long projectId,
-        @PathVariable Long taskId
+        @PathVariable Long taskId,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "20") int size
     ) {
-        return ResponseEntity.ok(taskCommentService.getByTask(workspaceId, projectId, taskId));
+        return ResponseEntity.ok(taskCommentService.getByTask(workspaceId, projectId, taskId, page, size));
     }
 
     @PutMapping("/{commentId}")

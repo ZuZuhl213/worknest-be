@@ -1,5 +1,6 @@
 HELP.md
 target/
+cookies.txt
 *.log
 .env
 .env.*

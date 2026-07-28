@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.hoang.worknest.entity.User;
@@ -43,7 +44,11 @@ class CurrentUserServiceTest {
 
     @Test
     void throwsWhenAuthenticationIsAnonymous() {
-        Authentication authentication = new AnonymousAuthenticationToken("key", "anonymous", null);
+        Authentication authentication = new AnonymousAuthenticationToken(
+            "key",
+            "anonymous",
+            AuthorityUtils.createAuthorityList("ROLE_ANONYMOUS")
+        );
         SecurityContextHolder.getContext().setAuthentication(authentication);
 
         ResourceNotFoundException exception = assertThrows(ResourceNotFoundException.class,

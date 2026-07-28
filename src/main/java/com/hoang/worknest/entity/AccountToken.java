@@ -3,21 +3,20 @@ package com.hoang.worknest.entity;
 import java.time.OffsetDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.UpdateTimestamp;
 
-import com.hoang.worknest.enums.WorkspaceRole;
+import com.hoang.worknest.enums.AccountTokenType;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -25,49 +24,37 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(
-    name = "workspace_members",
-    uniqueConstraints = @UniqueConstraint(
-        name = "uq_workspace_members_workspace_user",
-        columnNames = {"workspace_id", "user_id"}
-    )
-)
+@Table(name = "account_tokens")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class WorkspaceMember {
+public class AccountToken {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false, updatable = false)
     private Long id;
 
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "workspace_id", nullable = false)
-    private Workspace workspace;
-
-    @ManyToOne(optional = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false, length = 20)
-    private WorkspaceRole role;
+    @Column(name = "type", nullable = false, length = 40)
+    private AccountTokenType type;
 
-    @Column(name = "joined_at", nullable = false)
-    private OffsetDateTime joinedAt;
+    @Column(name = "token_hash", nullable = false, unique = true, length = 64)
+    private String tokenHash;
 
-    @ManyToOne
-    @JoinColumn(name = "invited_by_user_id")
-    private User invitedBy;
+    @Column(name = "expires_at", nullable = false)
+    private OffsetDateTime expiresAt;
+
+    @Column(name = "used_at")
+    private OffsetDateTime usedAt;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
-
-    @UpdateTimestamp
-    @Column(name = "updated_at", nullable = false)
-    private OffsetDateTime updatedAt;
 }

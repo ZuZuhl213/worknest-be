@@ -18,8 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.hoang.worknest.dto.auth.AuthResponse;
 import com.hoang.worknest.dto.auth.CurrentUserResponse;
+import com.hoang.worknest.dto.auth.ForgotPasswordRequest;
 import com.hoang.worknest.dto.auth.LoginRequest;
 import com.hoang.worknest.dto.auth.RegisterRequest;
+import com.hoang.worknest.dto.auth.ResetPasswordRequest;
+import com.hoang.worknest.dto.auth.VerifyEmailRequest;
 import com.hoang.worknest.service.AuthService;
 import com.hoang.worknest.service.AuthService.AuthSession;
 
@@ -45,6 +48,24 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return sessionResponse(authService.login(request), HttpStatus.OK);
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/verify-email")
+    public ResponseEntity<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        authService.verifyEmail(request);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/csrf")

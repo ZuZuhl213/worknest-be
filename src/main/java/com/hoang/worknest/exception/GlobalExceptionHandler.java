@@ -13,7 +13,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import lombok.extern.slf4j.Slf4j;
+
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
@@ -52,6 +55,12 @@ public class GlobalExceptionHandler {
         return errorBody(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
 
+    @ExceptionHandler(InvalidAccountTokenException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, Object> handleInvalidAccountToken(InvalidAccountTokenException ex) {
+        return errorBody(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(TooManyRequestsException.class)
     public ResponseEntity<Map<String, Object>> handleTooManyRequests(TooManyRequestsException ex) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -84,6 +93,13 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.BAD_REQUEST, message));
         body.put("fields", fields);
         return body;
+    }
+
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public Map<String, Object> handleUnexpected(Exception ex) {
+        log.error("Unhandled exception", ex);
+        return errorBody(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
     }
 
     private Map<String, Object> errorBody(HttpStatus status, String message) {

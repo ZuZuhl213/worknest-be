@@ -1,6 +1,6 @@
 package com.hoang.worknest.enums;
 
-public enum Role {
+public enum WorkspaceRole {
     OWNER,
     ADMIN,
     MEMBER
