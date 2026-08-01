@@ -25,8 +25,10 @@ import com.hoang.worknest.dto.auth.AuthResponse;
 import com.hoang.worknest.dto.auth.AuthUserResponse;
 import com.hoang.worknest.dto.auth.CurrentUserResponse;
 import com.hoang.worknest.dto.auth.ForgotPasswordRequest;
+import com.hoang.worknest.dto.auth.GoogleAuthRequest;
 import com.hoang.worknest.dto.auth.LoginRequest;
 import com.hoang.worknest.dto.auth.RegisterRequest;
+import com.hoang.worknest.dto.auth.ResendVerificationRequest;
 import com.hoang.worknest.dto.auth.ResetPasswordRequest;
 import com.hoang.worknest.dto.auth.VerifyEmailRequest;
 import com.hoang.worknest.entity.AccountToken;
@@ -34,12 +36,16 @@ import com.hoang.worknest.entity.RefreshToken;
 import com.hoang.worknest.entity.User;
 import com.hoang.worknest.enums.AccountTokenType;
 import com.hoang.worknest.exception.ConflictException;
+import com.hoang.worknest.exception.EmailNotVerifiedException;
+import com.hoang.worknest.exception.ForbiddenException;
 import com.hoang.worknest.exception.InvalidRefreshTokenException;
 import com.hoang.worknest.exception.TooManyRequestsException;
 import com.hoang.worknest.repository.RefreshTokenRepository;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.security.AuthenticatedUser;
 import com.hoang.worknest.security.CurrentUserService;
+import com.hoang.worknest.security.GoogleIdentityVerifier;
+import com.hoang.worknest.security.GoogleIdentityVerifier.GoogleIdentity;
 import com.hoang.worknest.security.JwtService;
 
 import lombok.RequiredArgsConstructor;
@@ -60,6 +66,7 @@ public class AuthService {
     private final SecurityAuditService securityAuditService;
     private final AccountTokenService accountTokenService;
     private final AccountEmailSender accountEmailSender;
+    private final GoogleIdentityVerifier googleIdentityVerifier;
 
     @Value("${app.jwt.refresh-token-expiration}")
     private long refreshTokenExpirationMs;
@@ -74,7 +81,7 @@ public class AuthService {
     }
 
     @Transactional(noRollbackFor = TooManyRequestsException.class)
-    public AuthSession register(RegisterRequest request) {
+    public void register(RegisterRequest request) {
         rateLimitService.check("register-ip", securityAuditService.currentClientAddress(), 5, Duration.ofHours(1));
         String email = normalizeEmail(request.email());
         if (userRepository.existsByEmailIgnoreCase(email)) {
@@ -91,10 +98,9 @@ public class AuthService {
             .build());
         securityAuditService.log(savedUser, savedUser, "ACCOUNT_REGISTERED", "SUCCESS", Map.of());
         sendVerificationEmail(savedUser);
-        return issueNewFamily(savedUser);
     }
 
-    @Transactional(noRollbackFor = {AuthenticationException.class, TooManyRequestsException.class})
+    @Transactional(noRollbackFor = {AuthenticationException.class, EmailNotVerifiedException.class, TooManyRequestsException.class})
     public AuthSession login(LoginRequest request) {
         String email = normalizeEmail(request.email());
         rateLimitService.check("login-ip", securityAuditService.currentClientAddress(), 30, Duration.ofMinutes(15));
@@ -110,6 +116,10 @@ public class AuthService {
         User user = userRepository.findByEmailIgnoreCase(email)
             .orElseThrow(() -> new IllegalArgumentException("Invalid credentials"));
         rateLimitService.reset("login-account", email);
+        if (!Boolean.TRUE.equals(user.getEmailVerified())) {
+            securityAuditService.log(user, user, "LOGIN", "BLOCKED", Map.of("reason", "EMAIL_NOT_VERIFIED"));
+            throw new EmailNotVerifiedException();
+        }
         if (passwordEncoder.upgradeEncoding(user.getPasswordHash())) {
             user.setPasswordHash(passwordEncoder.encode(request.password()));
         }
@@ -117,6 +127,57 @@ public class AuthService {
         userRepository.save(user);
         revokeAllForUser(user.getId());
         securityAuditService.log(user, user, "LOGIN", "SUCCESS", Map.of());
+        return issueNewFamily(user);
+    }
+
+    @Transactional(noRollbackFor = TooManyRequestsException.class)
+    public AuthSession loginWithGoogle(GoogleAuthRequest request) {
+        rateLimitService.check("google-login-ip", securityAuditService.currentClientAddress(), 30, Duration.ofMinutes(15));
+        GoogleIdentity identity = googleIdentityVerifier.verify(request.credential());
+        String email = normalizeEmail(identity.email());
+
+        User user = userRepository.findByGoogleSubject(identity.subject()).orElseGet(() -> {
+            User existing = userRepository.findByEmailIgnoreCase(email).orElse(null);
+            if (existing != null) {
+                if (existing.getGoogleSubject() != null && !existing.getGoogleSubject().equals(identity.subject())) {
+                    throw new ConflictException("Email address is linked to another Google account");
+                }
+                existing.setGoogleSubject(identity.subject());
+                existing.setEmailVerified(Boolean.TRUE);
+                securityAuditService.log(existing, existing, "GOOGLE_ACCOUNT_LINKED", "SUCCESS", Map.of());
+                return existing;
+            }
+
+            int separator = email.indexOf('@');
+            String fallbackName = separator > 0 ? email.substring(0, separator) : email;
+            String fullName = identity.fullName() == null || identity.fullName().isBlank()
+                ? fallbackName
+                : identity.fullName().trim();
+            if (fullName.length() > 120) {
+                fullName = fullName.substring(0, 120);
+            }
+            User created = User.builder()
+                .email(email)
+                .passwordHash(passwordEncoder.encode(generateRefreshTokenValue()))
+                .googleSubject(identity.subject())
+                .fullName(fullName)
+                .avatarUrl(identity.pictureUrl())
+                .isActive(Boolean.TRUE)
+                .emailVerified(Boolean.TRUE)
+                .build();
+            User saved = userRepository.save(created);
+            securityAuditService.log(saved, saved, "GOOGLE_ACCOUNT_REGISTERED", "SUCCESS", Map.of());
+            return saved;
+        });
+
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            securityAuditService.log(user, user, "GOOGLE_LOGIN", "BLOCKED", Map.of("reason", "ACCOUNT_INACTIVE"));
+            throw new ForbiddenException("Account is inactive");
+        }
+        user.setLastLoginAt(OffsetDateTime.now());
+        userRepository.save(user);
+        revokeAllForUser(user.getId());
+        securityAuditService.log(user, user, "GOOGLE_LOGIN", "SUCCESS", Map.of());
         return issueNewFamily(user);
     }
 
@@ -147,6 +208,10 @@ public class AuthService {
         if (!Boolean.TRUE.equals(current.getUser().getIsActive())) {
             revokeFamily(current.getFamilyId(), now);
             throw new InvalidRefreshTokenException("Account is inactive");
+        }
+        if (!Boolean.TRUE.equals(current.getUser().getEmailVerified())) {
+            revokeFamily(current.getFamilyId(), now);
+            throw new InvalidRefreshTokenException("Email address has not been verified");
         }
 
         String nextRawToken = generateRefreshTokenValue();
@@ -211,6 +276,19 @@ public class AuthService {
         user.setEmailVerified(Boolean.TRUE);
         userRepository.save(user);
         securityAuditService.log(user, user, "EMAIL_VERIFIED", "SUCCESS", Map.of());
+    }
+
+    @Transactional(noRollbackFor = TooManyRequestsException.class)
+    public void resendVerification(ResendVerificationRequest request) {
+        String email = normalizeEmail(request.email());
+        rateLimitService.check("resend-verification-ip", securityAuditService.currentClientAddress(), 10, Duration.ofHours(1));
+        rateLimitService.check("resend-verification-account", email, 3, Duration.ofHours(1));
+        userRepository.findByEmailIgnoreCase(email)
+            .filter(user -> !Boolean.TRUE.equals(user.getEmailVerified()))
+            .ifPresent(user -> {
+                sendVerificationEmail(user);
+                securityAuditService.log(user, user, "EMAIL_VERIFICATION_RESENT", "SUCCESS", Map.of());
+            });
     }
 
     @Transactional(readOnly = true)

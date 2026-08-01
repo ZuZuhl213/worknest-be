@@ -88,6 +88,7 @@ public class JwtService {
             && subject != null
             && subject.equals(user.getId().toString())
             && Boolean.TRUE.equals(user.getIsActive())
+            && Boolean.TRUE.equals(user.getEmailVerified())
             && tokenVersion == user.getTokenVersion()
             && issuedAt <= Instant.now().plusSeconds(30).getEpochSecond()
             && exp > Instant.now().getEpochSecond();

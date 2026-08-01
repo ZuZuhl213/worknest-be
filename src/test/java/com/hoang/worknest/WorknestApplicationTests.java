@@ -8,12 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -46,6 +46,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.hoang.worknest.dto.auth.ForgotPasswordRequest;
+import com.hoang.worknest.dto.auth.LoginRequest;
 import com.hoang.worknest.dto.auth.RegisterRequest;
 import com.hoang.worknest.dto.auth.ResetPasswordRequest;
 import com.hoang.worknest.dto.auth.VerifyEmailRequest;
@@ -67,6 +68,8 @@ import com.hoang.worknest.service.AuthService;
 import com.hoang.worknest.service.FileStorageService;
 import com.hoang.worknest.service.SecurityAuditService;
 import com.hoang.worknest.security.JwtService;
+import com.hoang.worknest.security.GoogleIdentityVerifier;
+import com.hoang.worknest.security.GoogleIdentityVerifier.GoogleIdentity;
 import com.hoang.worknest.entity.ActivityLog;
 import com.hoang.worknest.entity.Attachment;
 import com.hoang.worknest.entity.Project;
@@ -127,6 +130,7 @@ class WorknestApplicationTests {
 
     @MockitoBean AccountEmailSender accountEmailSender;
     @MockitoBean FileStorageService fileStorageService;
+    @MockitoBean GoogleIdentityVerifier googleIdentityVerifier;
 
     @DynamicPropertySource
     static void infrastructure(DynamicPropertyRegistry registry) {
@@ -145,6 +149,7 @@ class WorknestApplicationTests {
         }
         reset(accountEmailSender);
         reset(fileStorageService);
+        reset(googleIdentityVerifier);
     }
 
     @Test
@@ -152,7 +157,7 @@ class WorknestApplicationTests {
     }
 
     @Test
-    void registrationReturnsRefreshTokenOnlyAsHardenedCookie() throws Exception {
+    void registrationRequiresEmailVerificationBeforeCreatingSession() throws Exception {
         String email = "cookie-" + UUID.randomUUID() + "@example.com";
         mockMvc.perform(post("/api/auth/register")
                 .with(csrf())
@@ -160,12 +165,12 @@ class WorknestApplicationTests {
                 .content("""
                     {"email":"%s","password":"a sufficiently long passphrase 1","fullName":"Cookie Test"}
                     """.formatted(email)))
-            .andExpect(status().isCreated())
-            .andExpect(cookie().httpOnly("worknest_rt", true))
-            .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("SameSite=Strict")))
-            .andExpect(header().string("Set-Cookie", org.hamcrest.Matchers.containsString("Path=/api/auth")))
-            .andExpect(jsonPath("$.accessToken").isString())
-            .andExpect(jsonPath("$.refreshToken").doesNotExist());
+            .andExpect(status().isAccepted())
+            .andExpect(cookie().doesNotExist("worknest_rt"));
+
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+        assertFalse(user.getEmailVerified());
+        verify(accountEmailSender).sendEmailVerification(any(User.class), any(String.class));
     }
 
     @Test
@@ -177,8 +182,8 @@ class WorknestApplicationTests {
                 .content("""
                     {"email":"%s","password":"abcde123","fullName":"Password Test"}
                     """.formatted(email)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.accessToken").isString());
+            .andExpect(status().isAccepted())
+            .andExpect(cookie().doesNotExist("worknest_rt"));
     }
 
     @Test
@@ -198,8 +203,8 @@ class WorknestApplicationTests {
     @Test
     void concurrentRefreshAllowsOneRotationAndRevokesFamilyOnReuse() throws Exception {
         String email = "refresh-" + UUID.randomUUID() + "@example.com";
-        AuthService.AuthSession initial = authService.register(
-            new RegisterRequest(email, "another sufficiently long passphrase", "Refresh Test")
+        AuthService.AuthSession initial = registerVerifyAndLogin(
+            email, "another sufficiently long passphrase", "Refresh Test"
         );
         String rawToken = initial.refreshToken();
         var stored = refreshTokenRepository.findFirstByTokenHash(sha256(rawToken)).orElseThrow();
@@ -251,8 +256,8 @@ class WorknestApplicationTests {
     @Test
     void passwordResetTokenCanBeUsedOnlyOnceAndInvalidatesOldAccessToken() throws Exception {
         String email = "reset-" + UUID.randomUUID() + "@example.com";
-        AuthService.AuthSession initial = authService.register(
-            new RegisterRequest(email, "another sufficiently long passphrase 1", "Reset Test")
+        AuthService.AuthSession initial = registerVerifyAndLogin(
+            email, "another sufficiently long passphrase 1", "Reset Test"
         );
         reset(accountEmailSender);
 
@@ -295,6 +300,69 @@ class WorknestApplicationTests {
         authService.verifyEmail(new VerifyEmailRequest(rawToken));
 
         assertTrue(userRepository.findById(user.getId()).orElseThrow().getEmailVerified());
+    }
+
+    @Test
+    void unverifiedUserCannotLogIn() throws Exception {
+        String email = "unverified-" + UUID.randomUUID() + "@example.com";
+        authService.register(new RegisterRequest(email, "password123", "Unverified Test"));
+
+        mockMvc.perform(post("/api/auth/login")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"email":"%s","password":"password123"}
+                    """.formatted(email)))
+            .andExpect(status().isForbidden())
+            .andExpect(cookie().doesNotExist("worknest_rt"))
+            .andExpect(jsonPath("$.code").value("EMAIL_NOT_VERIFIED"));
+    }
+
+    @Test
+    void resendVerificationInvalidatesPreviousToken() throws Exception {
+        String email = "resend-" + UUID.randomUUID() + "@example.com";
+        authService.register(new RegisterRequest(email, "password123", "Resend Test"));
+        ArgumentCaptor<String> firstToken = ArgumentCaptor.forClass(String.class);
+        verify(accountEmailSender).sendEmailVerification(any(User.class), firstToken.capture());
+        reset(accountEmailSender);
+
+        mockMvc.perform(post("/api/auth/resend-verification")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"email":"%s"}
+                    """.formatted(email)))
+            .andExpect(status().isNoContent());
+
+        ArgumentCaptor<String> secondToken = ArgumentCaptor.forClass(String.class);
+        verify(accountEmailSender).sendEmailVerification(any(User.class), secondToken.capture());
+        assertNotEquals(firstToken.getValue(), secondToken.getValue());
+        assertThrows(InvalidAccountTokenException.class,
+            () -> authService.verifyEmail(new VerifyEmailRequest(firstToken.getValue())));
+        authService.verifyEmail(new VerifyEmailRequest(secondToken.getValue()));
+    }
+
+    @Test
+    void googleLoginCreatesVerifiedUserAndHardenedSession() throws Exception {
+        String email = "google-" + UUID.randomUUID() + "@example.com";
+        when(googleIdentityVerifier.verify("valid-google-token"))
+            .thenReturn(new GoogleIdentity("google-subject-" + UUID.randomUUID(), email, "Google User", "https://example.com/avatar.png"));
+
+        mockMvc.perform(post("/api/auth/google")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"credential":"valid-google-token"}
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(cookie().httpOnly("worknest_rt", true))
+            .andExpect(jsonPath("$.accessToken").isString())
+            .andExpect(jsonPath("$.user.email").value(email))
+            .andExpect(jsonPath("$.user.emailVerified").value(true));
+
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+        assertTrue(user.getEmailVerified());
+        assertTrue(user.getGoogleSubject().startsWith("google-subject-"));
     }
 
     @Test
@@ -596,6 +664,14 @@ class WorknestApplicationTests {
             .systemRole(SystemRole.USER)
             .tokenVersion(0)
             .build());
+    }
+
+    private AuthService.AuthSession registerVerifyAndLogin(String email, String password, String fullName) {
+        authService.register(new RegisterRequest(email, password, fullName));
+        ArgumentCaptor<String> tokenCaptor = ArgumentCaptor.forClass(String.class);
+        verify(accountEmailSender).sendEmailVerification(any(User.class), tokenCaptor.capture());
+        authService.verifyEmail(new VerifyEmailRequest(tokenCaptor.getValue()));
+        return authService.login(new LoginRequest(email, password));
     }
 
     private String sha256(String value) throws Exception {

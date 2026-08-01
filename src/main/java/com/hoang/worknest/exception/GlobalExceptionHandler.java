@@ -25,6 +25,14 @@ public class GlobalExceptionHandler {
         return errorBody(HttpStatus.UNAUTHORIZED, "Invalid email or password");
     }
 
+    @ExceptionHandler(GoogleAuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Map<String, Object> handleGoogleAuthentication(GoogleAuthenticationException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.UNAUTHORIZED, ex.getMessage()));
+        body.put("code", "GOOGLE_AUTHENTICATION_FAILED");
+        return body;
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, Object> handleIllegalArgument(IllegalArgumentException ex) {
@@ -47,6 +55,14 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public Map<String, Object> handleForbidden(ForbiddenException ex) {
         return errorBody(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(EmailNotVerifiedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Map<String, Object> handleEmailNotVerified(EmailNotVerifiedException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.FORBIDDEN, ex.getMessage()));
+        body.put("code", "EMAIL_NOT_VERIFIED");
+        return body;
     }
 
     @ExceptionHandler(InvalidRefreshTokenException.class)
