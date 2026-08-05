@@ -6,12 +6,14 @@ import java.util.Map;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.hoang.worknest.dto.common.PagedResponse;
+import com.hoang.worknest.dto.user.AdminOverviewResponse;
 import com.hoang.worknest.dto.user.DeactivateAccountRequest;
 import com.hoang.worknest.dto.user.UserProfileUpdateRequest;
 import com.hoang.worknest.dto.user.UserResponse;
@@ -55,25 +57,39 @@ public class UserService {
         if (workspaceRepository.existsByOwnerId(user.getId())) {
             throw new ConflictException("Transfer owned workspaces before deactivating this account");
         }
-        if (user.getSystemRole() == SystemRole.ADMIN
-            && userRepository.findBySystemRoleAndIsActiveTrueOrderById(SystemRole.ADMIN).size() <= 1) {
+        if (user.getSystemRole() == SystemRole.SYSTEM_ADMIN
+            && userRepository.findBySystemRoleAndIsActiveTrueOrderById(SystemRole.SYSTEM_ADMIN).size() <= 1) {
             throw new ConflictException("The last active system administrator cannot be deactivated");
         }
         deactivate(user, user);
     }
 
     @Transactional(readOnly = true)
-    public PagedResponse<UserResponse> searchUsers(String search, Boolean active, int page, int size) {
+    public PagedResponse<UserResponse> searchUsers(
+        String search, Boolean active, Boolean emailVerified, SystemRole role,
+        int page, int size, String sort, String direction
+    ) {
         if (page < 0 || size < 1 || size > 100) {
             throw new IllegalArgumentException("Invalid pagination parameters");
         }
         String normalizedSearch = normalizeSearch(search);
-        Page<User> result = normalizedSearch == null
-            ? userRepository.searchAll(active, PageRequest.of(page, size))
-            : userRepository.searchByText(normalizedSearch, active, PageRequest.of(page, size));
+        Page<User> result = userRepository.search(normalizedSearch, active, emailVerified, role,
+            PageRequest.of(page, size, Sort.by(parseDirection(direction), parseSort(sort))));
         return new PagedResponse<>(result.getContent().stream().map(userMapper::toResponse).toList(),
             result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages(),
             result.isFirst(), result.isLast());
+    }
+
+    @Transactional(readOnly = true)
+    public AdminOverviewResponse getAdminOverview() {
+        Page<User> recent = userRepository.findAll(PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt")));
+        return new AdminOverviewResponse(
+            userRepository.count(),
+            userRepository.countByIsActiveTrue(),
+            userRepository.countByIsActiveFalse(),
+            userRepository.countByEmailVerifiedTrue(),
+            recent.getContent().stream().map(userMapper::toResponse).toList()
+        );
     }
 
     @Transactional(readOnly = true)
@@ -90,13 +106,27 @@ public class UserService {
             target.setDeactivatedAt(null);
             auditService.log(actor, target, "ACCOUNT_ENABLED", "SUCCESS", Map.of());
         } else {
-            if (target.getSystemRole() == SystemRole.ADMIN
-                && userRepository.findBySystemRoleAndIsActiveTrueOrderById(SystemRole.ADMIN).size() <= 1) {
+            if (target.getId().equals(actor.getId())) {
+                throw new ForbiddenException("System administrators cannot disable their own account");
+            }
+            if (target.getSystemRole() == SystemRole.SYSTEM_ADMIN
+                && userRepository.findBySystemRoleAndIsActiveTrueOrderById(SystemRole.SYSTEM_ADMIN).size() <= 1) {
                 throw new ConflictException("The last active system administrator cannot be disabled");
             }
             deactivate(actor, target);
         }
         return userMapper.toResponse(userRepository.save(target));
+    }
+
+    @Transactional
+    public UserResponse setWorkspaceCreation(Long id, boolean enabled) {
+        User actor = currentUserEntity();
+        User target = requireUser(id);
+        target.setCanCreateWorkspace(enabled);
+        User saved = userRepository.save(target);
+        auditService.log(actor, saved,
+            enabled ? "WORKSPACE_CREATION_ENABLED" : "WORKSPACE_CREATION_DISABLED", "SUCCESS", Map.of());
+        return userMapper.toResponse(saved);
     }
 
     @Transactional
@@ -140,6 +170,25 @@ public class UserService {
     }
 
     private String normalizeSearch(String search) {
-        return search == null || search.isBlank() ? null : search.trim();
+        return search == null || search.isBlank() ? "" : search.trim();
+    }
+
+    private String parseSort(String sort) {
+        return switch (sort == null || sort.isBlank() ? "createdAt" : sort) {
+            case "createdAt" -> "createdAt";
+            case "lastLoginAt" -> "lastLoginAt";
+            case "fullName" -> "fullName";
+            default -> throw new IllegalArgumentException("Invalid sort field");
+        };
+    }
+
+    private Sort.Direction parseDirection(String direction) {
+        if (direction == null || direction.isBlank() || direction.equalsIgnoreCase("desc")) {
+            return Sort.Direction.DESC;
+        }
+        if (direction.equalsIgnoreCase("asc")) {
+            return Sort.Direction.ASC;
+        }
+        throw new IllegalArgumentException("Invalid sort direction");
     }
 }

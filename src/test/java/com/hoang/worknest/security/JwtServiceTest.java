@@ -18,7 +18,7 @@ class JwtServiceTest {
     @BeforeEach
     void setUp() {
         jwtService = new JwtService(new ObjectMapper(), SECRET, 900_000, "worknest", "worknest-web");
-        user = User.builder().id(42L).email("user@example.com").isActive(true).tokenVersion(3).build();
+        user = User.builder().id(42L).email("user@example.com").isActive(true).emailVerified(true).tokenVersion(3).build();
     }
 
     @Test
@@ -33,6 +33,13 @@ class JwtServiceTest {
         assertFalse(jwtService.isAccessTokenValid(token, user));
         user.setIsActive(true);
         user.setTokenVersion(4);
+        assertFalse(jwtService.isAccessTokenValid(token, user));
+    }
+
+    @Test
+    void rejectsUnverifiedUser() {
+        String token = jwtService.generateAccessToken(user);
+        user.setEmailVerified(false);
         assertFalse(jwtService.isAccessTokenValid(token, user));
     }
 

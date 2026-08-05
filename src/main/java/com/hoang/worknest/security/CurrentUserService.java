@@ -36,6 +36,7 @@ public class CurrentUserService {
             user.getEmailVerified(),
             user.getIsActive(),
             user.getSystemRole(),
+            user.getCanCreateWorkspace(),
             user.getTokenVersion(),
             user.getLastLoginAt()
         );

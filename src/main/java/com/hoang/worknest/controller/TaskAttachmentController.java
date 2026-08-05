@@ -3,6 +3,7 @@ package com.hoang.worknest.controller;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,5 +34,13 @@ public class TaskAttachmentController {
     @GetMapping
     public ResponseEntity<List<AttachmentResponse>> getAttachments(@PathVariable Long taskId) {
         return ResponseEntity.ok(taskService.getAttachments(taskId));
+    }
+
+    @DeleteMapping("/{attachmentId}")
+    public ResponseEntity<Void> deleteAttachment(
+            @PathVariable Long taskId,
+            @PathVariable Long attachmentId) {
+        taskService.deleteAttachment(taskId, attachmentId);
+        return ResponseEntity.noContent().build();
     }
 }

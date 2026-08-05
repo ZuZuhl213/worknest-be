@@ -10,6 +10,7 @@ public record CurrentUserResponse(
     Boolean emailVerified,
     Boolean isActive,
     SystemRole systemRole,
+    Boolean canCreateWorkspace,
     OffsetDateTime lastLoginAt
 ) {
 }

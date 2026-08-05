@@ -1,6 +1,7 @@
 package com.hoang.worknest.repository.specification;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 
 import org.springframework.data.jpa.domain.Specification;
 
@@ -15,6 +16,14 @@ public final class TaskSpecifications {
 
     public static Specification<Task> belongsToProject(Long projectId) {
         return (root, query, cb) -> cb.equal(root.get("project").get("id"), projectId);
+    }
+
+    public static Specification<Task> belongsToWorkspace(Long workspaceId) {
+        return (root, query, cb) -> cb.equal(root.get("project").get("workspace").get("id"), workspaceId);
+    }
+
+    public static Specification<Task> projectIn(Collection<Long> projectIds) {
+        return (root, query, cb) -> projectIds == null ? null : root.get("project").get("id").in(projectIds);
     }
 
     public static Specification<Task> hasStatus(TaskStatus status) {

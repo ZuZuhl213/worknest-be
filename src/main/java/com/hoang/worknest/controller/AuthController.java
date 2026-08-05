@@ -18,8 +18,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.hoang.worknest.dto.auth.AuthResponse;
 import com.hoang.worknest.dto.auth.CurrentUserResponse;
+import com.hoang.worknest.dto.auth.ForgotPasswordRequest;
+import com.hoang.worknest.dto.auth.GoogleAuthRequest;
 import com.hoang.worknest.dto.auth.LoginRequest;
 import com.hoang.worknest.dto.auth.RegisterRequest;
+import com.hoang.worknest.dto.auth.ResendVerificationRequest;
+import com.hoang.worknest.dto.auth.ResetPasswordRequest;
+import com.hoang.worknest.dto.auth.VerifyEmailRequest;
 import com.hoang.worknest.service.AuthService;
 import com.hoang.worknest.service.AuthService.AuthSession;
 
@@ -38,13 +43,43 @@ public class AuthController {
     private boolean cookieSecure;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return sessionResponse(authService.register(request), HttpStatus.CREATED);
+    public ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
+        authService.register(request);
+        return ResponseEntity.accepted().build();
     }
 
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return sessionResponse(authService.login(request), HttpStatus.OK);
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<AuthResponse> google(@Valid @RequestBody GoogleAuthRequest request) {
+        return sessionResponse(authService.loginWithGoogle(request), HttpStatus.OK);
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/verify-email")
+    public ResponseEntity<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        authService.verifyEmail(request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+        authService.resendVerification(request);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/csrf")

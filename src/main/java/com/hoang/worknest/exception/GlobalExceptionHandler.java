@@ -13,13 +13,24 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import lombok.extern.slf4j.Slf4j;
+
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public Map<String, Object> handleBadCredentials(BadCredentialsException ex) {
         return errorBody(HttpStatus.UNAUTHORIZED, "Invalid email or password");
+    }
+
+    @ExceptionHandler(GoogleAuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Map<String, Object> handleGoogleAuthentication(GoogleAuthenticationException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.UNAUTHORIZED, ex.getMessage()));
+        body.put("code", "GOOGLE_AUTHENTICATION_FAILED");
+        return body;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
@@ -46,10 +57,24 @@ public class GlobalExceptionHandler {
         return errorBody(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
+    @ExceptionHandler(EmailNotVerifiedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Map<String, Object> handleEmailNotVerified(EmailNotVerifiedException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.FORBIDDEN, ex.getMessage()));
+        body.put("code", "EMAIL_NOT_VERIFIED");
+        return body;
+    }
+
     @ExceptionHandler(InvalidRefreshTokenException.class)
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public Map<String, Object> handleInvalidRefreshToken(InvalidRefreshTokenException ex) {
         return errorBody(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidAccountTokenException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, Object> handleInvalidAccountToken(InvalidAccountTokenException ex) {
+        return errorBody(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(TooManyRequestsException.class)
@@ -84,6 +109,13 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = new LinkedHashMap<>(errorBody(HttpStatus.BAD_REQUEST, message));
         body.put("fields", fields);
         return body;
+    }
+
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public Map<String, Object> handleUnexpected(Exception ex) {
+        log.error("Unhandled exception", ex);
+        return errorBody(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");
     }
 
     private Map<String, Object> errorBody(HttpStatus status, String message) {

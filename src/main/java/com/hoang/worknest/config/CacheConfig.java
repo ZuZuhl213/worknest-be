@@ -12,6 +12,8 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 
+import org.springframework.lang.NonNull;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Configuration
@@ -26,7 +28,8 @@ public class CacheConfig {
     public static final String TASK_DETAIL = "taskDetail";
 
     @Bean
-    public CacheManager cacheManager(RedisConnectionFactory connectionFactory, ObjectMapper objectMapper) {
+    @SuppressWarnings("null")
+    public CacheManager cacheManager(@NonNull RedisConnectionFactory connectionFactory, @NonNull ObjectMapper objectMapper) {
         GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer(objectMapper);
 
         RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()

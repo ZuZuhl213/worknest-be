@@ -11,6 +11,7 @@ public record UserResponse(
     Boolean isActive,
     Boolean emailVerified,
     SystemRole systemRole,
+    Boolean canCreateWorkspace,
     OffsetDateTime deactivatedAt,
     OffsetDateTime lastLoginAt,
     OffsetDateTime createdAt,

@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk AS build
+FROM eclipse-temurin:25-jdk AS build
 
 WORKDIR /workspace
 
@@ -12,7 +12,7 @@ RUN ./mvnw clean package -DskipTests \
     && JAR_FILE="$(find target -maxdepth 1 -type f -name '*.jar' ! -name '*.original' | head -n 1)" \
     && cp "$JAR_FILE" app.jar
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 

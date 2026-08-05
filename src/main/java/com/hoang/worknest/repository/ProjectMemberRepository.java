@@ -3,6 +3,8 @@ package com.hoang.worknest.repository;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -16,6 +18,7 @@ import jakarta.persistence.LockModeType;
 
 public interface ProjectMemberRepository extends JpaRepository<ProjectMember, Long> {
     List<ProjectMember> findByProjectId(Long projectId);
+    Page<ProjectMember> findByProjectId(Long projectId, Pageable pageable);
     List<ProjectMember> findByProjectWorkspaceIdAndUserId(Long workspaceId, Long userId);
     Optional<ProjectMember> findByProjectIdAndUserId(Long projectId, Long userId);
     boolean existsByProjectIdAndUserId(Long projectId, Long userId);

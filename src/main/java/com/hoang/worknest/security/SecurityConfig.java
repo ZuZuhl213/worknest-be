@@ -54,12 +54,17 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/auth/register",
                     "/api/auth/login",
+                    "/api/auth/google",
+                    "/api/auth/forgot-password",
+                    "/api/auth/reset-password",
+                    "/api/auth/verify-email",
+                    "/api/auth/resend-verification",
                     "/api/auth/csrf",
                     "/api/auth/refresh",
                     "/api/auth/logout",
                     "/api/health"
                 ).permitAll()
-                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/**").hasRole("SYSTEM_ADMIN")
                 .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                 .anyRequest().authenticated()
             )

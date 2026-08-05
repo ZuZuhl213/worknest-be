@@ -43,6 +43,9 @@ public class User {
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String passwordHash;
 
+    @Column(name = "google_subject", unique = true, length = 255)
+    private String googleSubject;
+
     @Column(name = "full_name", nullable = false, length = 120)
     private String fullName;
 
@@ -64,6 +67,10 @@ public class User {
     @Column(name = "system_role", nullable = false, length = 20)
     @Builder.Default
     private SystemRole systemRole = SystemRole.USER;
+
+    @Column(name = "can_create_workspace", nullable = false)
+    @Builder.Default
+    private Boolean canCreateWorkspace = Boolean.FALSE;
 
     @Column(name = "token_version", nullable = false)
     @Builder.Default

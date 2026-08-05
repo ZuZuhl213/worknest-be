@@ -5,7 +5,7 @@ import java.time.OffsetDateTime;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
-import com.hoang.worknest.enums.Role;
+import com.hoang.worknest.enums.WorkspaceRole;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -54,7 +54,7 @@ public class WorkspaceMember {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false, length = 20)
-    private Role role;
+    private WorkspaceRole role;
 
     @Column(name = "joined_at", nullable = false)
     private OffsetDateTime joinedAt;
