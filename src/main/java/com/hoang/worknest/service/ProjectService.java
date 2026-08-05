@@ -91,7 +91,7 @@ public class ProjectService {
     public List<ProjectResponse> getByWorkspace(Long workspaceId) {
         workspaceAccessService.requireWorkspaceMember(workspaceId);
         AuthenticatedUser currentUser = currentUserService.getCurrentUser();
-        List<Project> projects = projectAuthorizationService.isWorkspaceAdmin(workspaceId)
+        List<Project> projects = projectAuthorizationService.isWorkspaceTaskManager(workspaceId)
             ? projectRepository.findByWorkspaceId(workspaceId)
             : projectRepository.findAccessibleByWorkspaceAndUser(workspaceId, currentUser.id());
         Map<Long, ProjectAuthorizationService.ProjectPermissions> permissionsByProject =

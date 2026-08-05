@@ -10,6 +10,7 @@ public record AuthenticatedUser(
     Boolean emailVerified,
     Boolean isActive,
     SystemRole systemRole,
+    Boolean canCreateWorkspace,
     Integer tokenVersion,
     OffsetDateTime lastLoginAt
 ) {

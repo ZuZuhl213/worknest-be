@@ -170,6 +170,8 @@ class WorknestApplicationTests {
 
         User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
         assertFalse(user.getEmailVerified());
+        assertEquals(SystemRole.USER, user.getSystemRole());
+        assertFalse(user.getCanCreateWorkspace());
         verify(accountEmailSender).sendEmailVerification(any(User.class), any(String.class));
     }
 
@@ -243,14 +245,166 @@ class WorknestApplicationTests {
     @Test
     void onlyGlobalAdminCanAccessAdminUserApi() throws Exception {
         User regular = saveUser(SystemRole.USER);
-        User admin = saveUser(SystemRole.ADMIN);
+        User admin = saveUser(SystemRole.SYSTEM_ADMIN);
+        User workspaceAdmin = saveUser(SystemRole.USER);
+        User owner = saveUser(SystemRole.USER);
+        Workspace workspace = workspaceRepository.save(Workspace.builder()
+            .name("Admin check " + UUID.randomUUID())
+            .slug("admin-check-" + UUID.randomUUID())
+            .owner(owner)
+            .build());
+        workspaceMemberRepository.save(WorkspaceMember.builder()
+            .workspace(workspace)
+            .user(workspaceAdmin)
+            .role(WorkspaceRole.ADMIN)
+            .joinedAt(OffsetDateTime.now())
+            .build());
 
         mockMvc.perform(get("/api/admin/users")
                 .header("Authorization", "Bearer " + jwtService.generateAccessToken(regular)))
             .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/admin/users")
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(workspaceAdmin)))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/admin/users/{id}/workspace-creation/enable", owner.getId())
+                .with(csrf())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(regular)))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/admin/users")
                 .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void systemAdminCanFilterDisableAndInvalidateAnAccountToken() throws Exception {
+        User admin = saveUser(SystemRole.SYSTEM_ADMIN);
+        User target = saveUser(SystemRole.USER);
+        target.setEmailVerified(false);
+        target = userRepository.save(target);
+        String targetToken = jwtService.generateAccessToken(target);
+
+        mockMvc.perform(get("/api/admin/users")
+                .param("search", target.getEmail())
+                .param("active", "true")
+                .param("emailVerified", "false")
+                .param("role", "USER")
+                .param("sort", "fullName")
+                .param("direction", "asc")
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].id").value(target.getId()));
+
+        mockMvc.perform(post("/api/admin/users/{id}/disable", target.getId())
+                .with(csrf())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.isActive").value(false));
+        assertEquals(1, userRepository.findById(target.getId()).orElseThrow().getTokenVersion());
+        mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + targetToken))
+            .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/admin/security-audit-logs")
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[*].action").value(org.hamcrest.Matchers.hasItem("ACCOUNT_DISABLED")));
+        mockMvc.perform(post("/api/admin/users/{id}/disable", admin.getId())
+                .with(csrf())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void systemAdminCannotAccessWorkspaceWithoutMembership() throws Exception {
+        User admin = saveUser(SystemRole.SYSTEM_ADMIN);
+        User owner = saveUser(SystemRole.USER);
+        Workspace workspace = workspaceRepository.save(Workspace.builder()
+            .name("Global admin " + UUID.randomUUID())
+            .slug("global-admin-" + UUID.randomUUID())
+            .owner(owner)
+            .archived(false)
+            .build());
+
+        mockMvc.perform(get("/api/workspaces/{id}", workspace.getId())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/workspaces")
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void systemAdminCanEnableAndDisableWorkspaceCreation() throws Exception {
+        User admin = saveUser(SystemRole.SYSTEM_ADMIN);
+        User target = saveUser(SystemRole.USER);
+
+        mockMvc.perform(post("/api/admin/users/{id}/workspace-creation/enable", target.getId())
+                .with(csrf())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.canCreateWorkspace").value(true));
+
+        mockMvc.perform(post("/api/admin/users/{id}/workspace-creation/disable", target.getId())
+                .with(csrf())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.canCreateWorkspace").value(false));
+
+        mockMvc.perform(get("/api/admin/security-audit-logs")
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(admin)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[*].action").value(org.hamcrest.Matchers.hasItems(
+                "WORKSPACE_CREATION_ENABLED", "WORKSPACE_CREATION_DISABLED"
+            )));
+    }
+
+    @Test
+    void workspaceCreationRequiresEntitlementAndCountsArchivedWorkspaces() throws Exception {
+        User unentitled = saveUser(SystemRole.USER);
+        mockMvc.perform(post("/api/workspaces")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(workspaceCreateJson("unentitled"))
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(unentitled)))
+            .andExpect(status().isForbidden());
+
+        User owner = saveUser(SystemRole.USER);
+        owner.setCanCreateWorkspace(true);
+        userRepository.save(owner);
+        mockMvc.perform(post("/api/workspaces")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(workspaceCreateJson("entitled"))
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(owner)))
+            .andExpect(status().isCreated());
+        Workspace created = workspaceRepository.findBySlug("entitled").orElseThrow();
+        assertEquals(owner.getId(), created.getOwner().getId());
+        assertEquals(WorkspaceRole.OWNER, workspaceMemberRepository
+            .findByWorkspaceIdAndUserId(created.getId(), owner.getId()).orElseThrow().getRole());
+
+        for (int index = 0; index < 4; index++) {
+            workspaceRepository.save(Workspace.builder()
+                .name("Archived " + index)
+                .slug("archived-" + index)
+                .owner(owner)
+                .archived(true)
+                .build());
+        }
+        mockMvc.perform(post("/api/workspaces")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(workspaceCreateJson("sixth"))
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(owner)))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.message").value("Workspace creation limit of 5 has been reached"));
+
+        User systemAdmin = saveUser(SystemRole.SYSTEM_ADMIN);
+        systemAdmin.setCanCreateWorkspace(true);
+        userRepository.save(systemAdmin);
+        mockMvc.perform(post("/api/workspaces")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(workspaceCreateJson("system-admin"))
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(systemAdmin)))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -363,6 +517,8 @@ class WorknestApplicationTests {
         User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
         assertTrue(user.getEmailVerified());
         assertTrue(user.getGoogleSubject().startsWith("google-subject-"));
+        assertEquals(SystemRole.USER, user.getSystemRole());
+        assertFalse(user.getCanCreateWorkspace());
     }
 
     @Test
@@ -474,7 +630,7 @@ class WorknestApplicationTests {
     @Test
     void adminCanReadSecurityAuditLogsAndRegularUserCannot() throws Exception {
         User regular = saveUser(SystemRole.USER);
-        User admin = saveUser(SystemRole.ADMIN);
+        User admin = saveUser(SystemRole.SYSTEM_ADMIN);
         securityAuditService.log(admin, regular, "ACCOUNT_ENABLED", "SUCCESS", Map.of("source", "test"));
 
         mockMvc.perform(get("/api/admin/security-audit-logs")
@@ -556,6 +712,12 @@ class WorknestApplicationTests {
             .systemRole(role)
             .tokenVersion(0)
             .build());
+    }
+
+    private String workspaceCreateJson(String slug) {
+        return """
+            {"name":"%s","slug":"%s","description":"Test workspace"}
+            """.formatted("Workspace " + slug, slug);
     }
 
     private ProjectFixture createProjectFixture(ProjectRole memberRole) {

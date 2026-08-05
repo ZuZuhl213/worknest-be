@@ -1,7 +1,7 @@
 package com.hoang.worknest.repository;
 
-import java.util.Optional;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
@@ -23,12 +23,17 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<User> findBySystemRoleAndIsActiveTrueOrderById(SystemRole systemRole);
 
-    @Query("select u from User u where (:active is null or u.isActive = :active)")
-    Page<User> searchAll(Boolean active, Pageable pageable);
+    long countByIsActiveTrue();
+    long countByIsActiveFalse();
+    long countByEmailVerifiedTrue();
 
-    @Query("select u from User u where " +
-        "(lower(u.email) like concat('%', lower(:search), '%') " +
-        "or lower(u.fullName) like concat('%', lower(:search), '%')) " +
-        "and (:active is null or u.isActive = :active)")
-    Page<User> searchByText(String search, Boolean active, Pageable pageable);
+    @Query("""
+        select u from User u
+        where (:search = '' or (lower(u.email) like concat('%', lower(:search), '%')
+            or lower(u.fullName) like concat('%', lower(:search), '%')))
+        and (:active is null or u.isActive = :active)
+        and (:emailVerified is null or u.emailVerified = :emailVerified)
+        and (:role is null or u.systemRole = :role)
+        """)
+    Page<User> search(String search, Boolean active, Boolean emailVerified, SystemRole role, Pageable pageable);
 }

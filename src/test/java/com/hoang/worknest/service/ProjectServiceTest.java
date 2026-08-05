@@ -78,7 +78,7 @@ class ProjectServiceTest {
         when(projectRepository.findByWorkspaceIdAndProjectKey(WORKSPACE_ID, "APP")).thenReturn(Optional.empty());
         when(projectRepository.findByWorkspaceIdAndName(WORKSPACE_ID, "Project")).thenReturn(Optional.empty());
         when(currentUserService.getCurrentUser())
-            .thenReturn(new AuthenticatedUser(USER_ID, "user@example.com", "User", true, true, SystemRole.USER, 0, null));
+            .thenReturn(new AuthenticatedUser(USER_ID, "user@example.com", "User", true, true, SystemRole.USER, false, 0, null));
         when(userRepository.findById(USER_ID)).thenReturn(Optional.of(creator));
         when(projectMapper.toEntity(new ProjectCreateRequest("Project", "app", "Desc"))).thenReturn(project);
         when(projectRepository.save(project)).thenReturn(savedProject);

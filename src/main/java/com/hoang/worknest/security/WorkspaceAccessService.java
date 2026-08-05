@@ -24,6 +24,7 @@ public class WorkspaceAccessService {
         Workspace workspace = workspaceRepository.findById(workspaceId)
             .orElseThrow(() -> new ResourceNotFoundException("Workspace not found"));
 
+        rejectSystemAdmin();
         AuthenticatedUser currentUser = currentUserService.getCurrentUser();
         workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, currentUser.id())
             .orElseThrow(() -> new ForbiddenException("You are not a member of this workspace"));
@@ -35,6 +36,7 @@ public class WorkspaceAccessService {
         Workspace workspace = workspaceRepository.findById(workspaceId)
             .orElseThrow(() -> new ResourceNotFoundException("Workspace not found"));
 
+        rejectSystemAdmin();
         WorkspaceMember membership = requireCurrentUserMembership(workspaceId);
 
         if (membership.getRole() != WorkspaceRole.OWNER && membership.getRole() != WorkspaceRole.ADMIN) {
@@ -48,6 +50,7 @@ public class WorkspaceAccessService {
         Workspace workspace = workspaceRepository.findById(workspaceId)
             .orElseThrow(() -> new ResourceNotFoundException("Workspace not found"));
 
+        rejectSystemAdmin();
         WorkspaceMember membership = requireCurrentUserMembership(workspaceId);
         if (membership.getRole() != WorkspaceRole.OWNER) {
             throw new ForbiddenException("Only workspace owner can perform this action");
@@ -57,8 +60,15 @@ public class WorkspaceAccessService {
     }
 
     public WorkspaceMember requireCurrentUserMembership(Long workspaceId) {
+        rejectSystemAdmin();
         AuthenticatedUser currentUser = currentUserService.getCurrentUser();
         return workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, currentUser.id())
             .orElseThrow(() -> new ForbiddenException("You are not a member of this workspace"));
+    }
+
+    private void rejectSystemAdmin() {
+        if (currentUserService.getCurrentUser().systemRole() == com.hoang.worknest.enums.SystemRole.SYSTEM_ADMIN) {
+            throw new ForbiddenException("System administrators cannot access workspace resources");
+        }
     }
 }

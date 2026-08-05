@@ -72,7 +72,7 @@ public class TaskService {
         Project project = projectAuthorizationService.requireMember(workspaceId, projectId);
         User reporter = requireCurrentUserEntity();
         if (request.assigneeUserId() != null) {
-            projectAuthorizationService.requireLead(workspaceId, projectId);
+            projectAuthorizationService.requireTaskManager(workspaceId, projectId);
         }
         User assignee = resolveAssignee(projectId, request.assigneeUserId());
 
@@ -159,7 +159,7 @@ public class TaskService {
         User actor = requireCurrentUserEntity();
         Long oldAssigneeId = task.getAssignee() != null ? task.getAssignee().getId() : null;
         if (!java.util.Objects.equals(oldAssigneeId, request.assigneeUserId())) {
-            projectAuthorizationService.requireLead(workspaceId, projectId);
+            projectAuthorizationService.requireTaskManager(workspaceId, projectId);
         }
         User assignee = resolveAssignee(projectId, request.assigneeUserId());
 
@@ -193,7 +193,7 @@ public class TaskService {
         @CacheEvict(cacheNames = CacheConfig.TASK_DETAIL, key = "#taskId")
     })
     public TaskResponse assign(Long workspaceId, Long projectId, Long taskId, TaskAssignRequest request) {
-        projectAuthorizationService.requireLead(workspaceId, projectId);
+        projectAuthorizationService.requireTaskManager(workspaceId, projectId);
         Task task = findTaskInProject(workspaceId, projectId, taskId);
         User actor = requireCurrentUserEntity();
         User assignee = resolveAssignee(projectId, request.assigneeUserId());
@@ -232,7 +232,7 @@ public class TaskService {
         boolean isReporter = task.getReporter() != null && task.getReporter().getId().equals(currentUser.getId());
         if (!isReporter) {
             // requireProjectLead will throw 403 if not LEAD/ADMIN/OWNER
-            projectAuthorizationService.requireLead(workspaceId, projectId);
+            projectAuthorizationService.requireTaskManager(workspaceId, projectId);
         }
 
         activityLogService.log(

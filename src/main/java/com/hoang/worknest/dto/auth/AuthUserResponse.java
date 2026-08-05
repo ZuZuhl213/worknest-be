@@ -8,6 +8,7 @@ public record AuthUserResponse(
     String fullName,
     String avatarUrl,
     Boolean emailVerified,
-    SystemRole systemRole
+    SystemRole systemRole,
+    Boolean canCreateWorkspace
 ) {
 }

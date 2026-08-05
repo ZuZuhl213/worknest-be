@@ -68,6 +68,10 @@ public class User {
     @Builder.Default
     private SystemRole systemRole = SystemRole.USER;
 
+    @Column(name = "can_create_workspace", nullable = false)
+    @Builder.Default
+    private Boolean canCreateWorkspace = Boolean.FALSE;
+
     @Column(name = "token_version", nullable = false)
     @Builder.Default
     private Integer tokenVersion = 0;

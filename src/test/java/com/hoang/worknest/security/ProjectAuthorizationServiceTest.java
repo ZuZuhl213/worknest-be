@@ -54,13 +54,14 @@ class ProjectAuthorizationServiceTest {
             .thenReturn(Optional.of(Project.builder().id(PROJECT_ID).workspace(workspace).build()));
         when(currentUserService.getCurrentUser())
             .thenReturn(new AuthenticatedUser(USER_ID, "user@example.com", "User", true, true,
-                com.hoang.worknest.enums.SystemRole.USER, 0, null));
+                com.hoang.worknest.enums.SystemRole.USER, false, 0, null));
     }
 
     static Stream<Arguments> roleMatrix() {
         return Stream.of(
             Arguments.of(WorkspaceRole.OWNER, null, true, true, true),
             Arguments.of(WorkspaceRole.ADMIN, null, true, true, true),
+            Arguments.of(WorkspaceRole.MANAGER, null, true, true, false),
             Arguments.of(WorkspaceRole.MEMBER, ProjectRole.LEAD, true, true, true),
             Arguments.of(WorkspaceRole.MEMBER, ProjectRole.MEMBER, true, true, false),
             Arguments.of(WorkspaceRole.MEMBER, ProjectRole.VIEWER, true, false, false)
@@ -83,6 +84,18 @@ class ProjectAuthorizationServiceTest {
         assertPermission(canRead, () -> authorization.requireAccess(WORKSPACE_ID, PROJECT_ID));
         assertPermission(canWrite, () -> authorization.requireMember(WORKSPACE_ID, PROJECT_ID));
         assertPermission(canLead, () -> authorization.requireLead(WORKSPACE_ID, PROJECT_ID));
+    }
+
+    @Test
+    void managerCanManageTasksButCannotManageProject() {
+        User user = User.builder().id(USER_ID).build();
+        Workspace workspace = Workspace.builder().id(WORKSPACE_ID).build();
+        when(workspaceMemberRepository.findByWorkspaceIdAndUserId(WORKSPACE_ID, USER_ID))
+            .thenReturn(Optional.of(WorkspaceMember.builder()
+                .workspace(workspace).user(user).role(WorkspaceRole.MANAGER).build()));
+
+        assertDoesNotThrow(() -> authorization.requireTaskManager(WORKSPACE_ID, PROJECT_ID));
+        assertThrows(ForbiddenException.class, () -> authorization.requireLead(WORKSPACE_ID, PROJECT_ID));
     }
 
     @Test

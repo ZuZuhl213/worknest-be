@@ -27,6 +27,7 @@ import com.hoang.worknest.entity.Workspace;
 import com.hoang.worknest.entity.WorkspaceMember;
 import com.hoang.worknest.entity.Task;
 import com.hoang.worknest.enums.WorkspaceRole;
+import com.hoang.worknest.enums.SystemRole;
 import com.hoang.worknest.enums.ProjectRole;
 import com.hoang.worknest.exception.ConflictException;
 import com.hoang.worknest.exception.ForbiddenException;
@@ -79,8 +80,17 @@ public class WorkspaceService {
         validateSlugUniqueness(request.slug(), null);
 
         AuthenticatedUser currentUser = currentUserService.getCurrentUser();
+        if (currentUser.systemRole() == SystemRole.SYSTEM_ADMIN) {
+            throw new ForbiddenException("System administrators cannot create workspaces");
+        }
         User owner = userRepository.findById(currentUser.id())
             .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
+        if (!Boolean.TRUE.equals(owner.getCanCreateWorkspace())) {
+            throw new ForbiddenException("Workspace creation has not been granted");
+        }
+        if (workspaceRepository.countByOwnerId(owner.getId()) >= 5) {
+            throw new ConflictException("Workspace creation limit of 5 has been reached");
+        }
 
         Workspace workspace = workspaceMapper.toEntity(request);
         workspace.setOwner(owner);
@@ -111,7 +121,11 @@ public class WorkspaceService {
 
     @Transactional(readOnly = true)
     public List<WorkspaceResponse> getAll() {
-        Long currentUserId = currentUserService.getCurrentUser().id();
+        AuthenticatedUser currentUser = currentUserService.getCurrentUser();
+        if (currentUser.systemRole() == SystemRole.SYSTEM_ADMIN) {
+            throw new ForbiddenException("System administrators cannot access workspace resources");
+        }
+        Long currentUserId = currentUser.id();
         return workspaceMemberRepository.findByUserId(currentUserId).stream()
             .map(WorkspaceMember::getWorkspace)
             .map(workspaceMapper::toResponse)
@@ -249,9 +263,7 @@ public class WorkspaceService {
         User invitedUser = userRepository.findByEmailIgnoreCase(request.email().trim().toLowerCase(java.util.Locale.ROOT))
             .orElseThrow(() -> new ResourceNotFoundException("User to invite not found"));
 
-        if (request.role() == WorkspaceRole.OWNER) {
-            throw new ForbiddenException("Owner role cannot be assigned through invite");
-        }
+        assertRoleCanBeManaged(workspaceAccessService.requireCurrentUserMembership(workspaceId).getRole(), request.role());
 
         workspaceMemberRepository.findByWorkspaceIdAndUserId(workspaceId, invitedUser.getId()).ifPresent(member -> {
             throw new ConflictException("User is already a member of this workspace");
@@ -294,16 +306,8 @@ public class WorkspaceService {
         WorkspaceMember member = getWorkspaceMember(workspaceId, memberId);
         WorkspaceMember actorMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
 
-        if (member.getRole() == WorkspaceRole.OWNER) {
-            throw new ForbiddenException("Owner role cannot be changed");
-        }
-        if (request.role() == WorkspaceRole.OWNER) {
-            throw new ForbiddenException("Owner transfer is not supported by this endpoint");
-        }
-        // ADMIN cannot change the role of another ADMIN (only OWNER can)
-        if (actorMembership.getRole() == WorkspaceRole.ADMIN && member.getRole() == WorkspaceRole.ADMIN) {
-            throw new ForbiddenException("Admins cannot change the role of other admins");
-        }
+        assertRoleCanBeManaged(actorMembership.getRole(), member.getRole());
+        assertRoleCanBeManaged(actorMembership.getRole(), request.role());
 
         member.setRole(request.role());
         WorkspaceMember savedMember = workspaceMemberRepository.save(member);
@@ -337,13 +341,7 @@ public class WorkspaceService {
         WorkspaceMember member = getWorkspaceMember(workspaceId, memberId);
         WorkspaceMember actorMembership = workspaceAccessService.requireCurrentUserMembership(workspaceId);
 
-        if (member.getRole() == WorkspaceRole.OWNER) {
-            throw new ForbiddenException("Workspace owner cannot be removed");
-        }
-        // ADMIN cannot remove another ADMIN (only OWNER can)
-        if (actorMembership.getRole() == WorkspaceRole.ADMIN && member.getRole() == WorkspaceRole.ADMIN) {
-            throw new ForbiddenException("Admins cannot remove other admins");
-        }
+        assertRoleCanBeManaged(actorMembership.getRole(), member.getRole());
 
         ensureNotLastProjectLead(workspaceId, member.getUser().getId());
         projectMemberRepository.deleteByWorkspaceAndUser(workspaceId, member.getUser().getId());
@@ -374,6 +372,19 @@ public class WorkspaceService {
         return workspaceMemberRepository.findById(memberId)
             .filter(member -> member.getWorkspace().getId().equals(workspaceId))
             .orElseThrow(() -> new ResourceNotFoundException("Workspace member not found"));
+    }
+
+    private void assertRoleCanBeManaged(WorkspaceRole actorRole, WorkspaceRole targetRole) {
+        if (targetRole == WorkspaceRole.OWNER) {
+            throw new ForbiddenException("Owner role cannot be managed through this endpoint");
+        }
+        if (actorRole == WorkspaceRole.OWNER) {
+            return;
+        }
+        if (actorRole == WorkspaceRole.ADMIN && targetRole != WorkspaceRole.ADMIN) {
+            return;
+        }
+        throw new ForbiddenException("You do not have permission to manage this member role");
     }
 
     private void ensureNotLastProjectLead(Long workspaceId, Long userId) {

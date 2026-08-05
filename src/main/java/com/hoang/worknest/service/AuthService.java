@@ -95,6 +95,7 @@ public class AuthService {
             .avatarUrl(null)
             .isActive(Boolean.TRUE)
             .emailVerified(Boolean.FALSE)
+            .canCreateWorkspace(Boolean.FALSE)
             .build());
         securityAuditService.log(savedUser, savedUser, "ACCOUNT_REGISTERED", "SUCCESS", Map.of());
         sendVerificationEmail(savedUser);
@@ -164,6 +165,7 @@ public class AuthService {
                 .avatarUrl(identity.pictureUrl())
                 .isActive(Boolean.TRUE)
                 .emailVerified(Boolean.TRUE)
+                .canCreateWorkspace(Boolean.FALSE)
                 .build();
             User saved = userRepository.save(created);
             securityAuditService.log(saved, saved, "GOOGLE_ACCOUNT_REGISTERED", "SUCCESS", Map.of());
@@ -296,7 +298,7 @@ public class AuthService {
         AuthenticatedUser currentUser = currentUserService.getCurrentUser();
         return new CurrentUserResponse(
             currentUser.id(), currentUser.email(), currentUser.fullName(), currentUser.emailVerified(),
-            currentUser.isActive(), currentUser.systemRole(), currentUser.lastLoginAt()
+            currentUser.isActive(), currentUser.systemRole(), currentUser.canCreateWorkspace(), currentUser.lastLoginAt()
         );
     }
 
@@ -338,7 +340,7 @@ public class AuthService {
         );
         return new AuthResponse("Bearer", accessToken, accessExpiresAt,
             new AuthUserResponse(user.getId(), user.getEmail(), user.getFullName(), user.getAvatarUrl(),
-                user.getEmailVerified(), user.getSystemRole()));
+                user.getEmailVerified(), user.getSystemRole(), user.getCanCreateWorkspace()));
     }
 
     private void revokeFamily(UUID familyId, OffsetDateTime now) {

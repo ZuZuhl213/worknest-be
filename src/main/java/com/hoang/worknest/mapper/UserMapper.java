@@ -20,6 +20,7 @@ public class UserMapper {
             user.getIsActive(),
             user.getEmailVerified(),
             user.getSystemRole(),
+            user.getCanCreateWorkspace(),
             user.getDeactivatedAt(),
             user.getLastLoginAt(),
             user.getCreatedAt(),

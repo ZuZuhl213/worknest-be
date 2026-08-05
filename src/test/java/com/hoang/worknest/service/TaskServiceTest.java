@@ -123,7 +123,7 @@ class TaskServiceTest {
         when(taskRepository.findById(TASK_ID)).thenReturn(Optional.of(task));
         when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(task.getProject()));
         when(currentUserService.getCurrentUser())
-            .thenReturn(new AuthenticatedUser(USER_ID, "user@example.com", "User", true, true, SystemRole.USER, 0, null));
+            .thenReturn(new AuthenticatedUser(USER_ID, "user@example.com", "User", true, true, SystemRole.USER, false, 0, null));
         when(workspaceMemberRepository.findByWorkspaceIdAndUserId(WORKSPACE_ID, USER_ID))
             .thenReturn(Optional.of(com.hoang.worknest.entity.WorkspaceMember.builder()
                 .workspace(task.getProject().getWorkspace())
