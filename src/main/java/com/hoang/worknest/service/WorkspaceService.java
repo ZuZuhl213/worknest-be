@@ -34,6 +34,7 @@ import com.hoang.worknest.exception.ForbiddenException;
 import com.hoang.worknest.exception.ResourceNotFoundException;
 import com.hoang.worknest.mapper.WorkspaceMemberMapper;
 import com.hoang.worknest.mapper.WorkspaceMapper;
+import com.hoang.worknest.repository.AttachmentRepository;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.repository.WorkspaceMemberRepository;
 import com.hoang.worknest.repository.WorkspaceRepository;
@@ -52,6 +53,8 @@ public class WorkspaceService {
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final AttachmentRepository attachmentRepository;
+    private final StorageCleanupService storageCleanupService;
     private final UserRepository userRepository;
     private final WorkspaceMapper workspaceMapper;
     private final WorkspaceMemberMapper workspaceMemberMapper;
@@ -83,7 +86,7 @@ public class WorkspaceService {
         if (currentUser.systemRole() == SystemRole.SYSTEM_ADMIN) {
             throw new ForbiddenException("System administrators cannot create workspaces");
         }
-        User owner = userRepository.findById(currentUser.id())
+        User owner = userRepository.findByIdForUpdate(currentUser.id())
             .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found"));
         if (!Boolean.TRUE.equals(owner.getCanCreateWorkspace())) {
             throw new ForbiddenException("Workspace creation has not been granted");
@@ -187,6 +190,10 @@ public class WorkspaceService {
     )
     public void delete(Long id) {
         Workspace workspace = workspaceAccessService.requireWorkspaceOwner(id);
+        attachmentRepository.findStorageObjectsByWorkspaceId(id).forEach(storageObject ->
+            storageCleanupService.enqueue(storageObject.getBucketName(), storageObject.getObjectKey())
+        );
+        workspaceMemberRepository.deleteAll(workspaceMemberRepository.findByWorkspaceId(id));
         workspaceRepository.delete(workspace);
     }
 

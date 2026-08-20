@@ -78,6 +78,38 @@ class FileStorageServiceTest {
     }
 
     @Test
+    void rejectsOversizedAvatarBeforeScanningOrUploading() {
+        byte[] png = new byte[24];
+        png[0] = (byte) 0x89;
+        png[1] = 'P';
+        png[2] = 'N';
+        png[3] = 'G';
+        png[4] = 0x0d;
+        png[5] = 0x0a;
+        png[6] = 0x1a;
+        png[7] = 0x0a;
+        png[12] = 'I';
+        png[13] = 'H';
+        png[14] = 'D';
+        png[15] = 'R';
+        png[16] = 0x00;
+        png[17] = 0x01;
+        png[18] = 0x00;
+        png[19] = 0x00;
+        png[20] = 0x00;
+        png[21] = 0x01;
+
+        assertThrows(IllegalArgumentException.class, () -> storage.uploadAvatar(
+            new MockMultipartFile("file", "large.png", "image/png", png), "avatars"));
+
+        verify(clamAvService, never()).scan(any(byte[].class));
+        verify(s3Client, never()).putObject(
+            org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.s3.model.PutObjectRequest.class),
+            org.mockito.ArgumentMatchers.any(software.amazon.awssdk.core.sync.RequestBody.class)
+        );
+    }
+
+    @Test
     void scannerFailureNeverPromotesQuarantinedObject() {
         doThrow(new ServiceUnavailableException("scanner unavailable"))
             .when(clamAvService).scan(any(byte[].class));

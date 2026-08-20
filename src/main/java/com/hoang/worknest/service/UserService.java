@@ -37,6 +37,7 @@ public class UserService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final FileStorageService fileStorageService;
+    private final StorageCleanupService storageCleanupService;
     private final CurrentUserService currentUserService;
     private final AuthService authService;
     private final SecurityAuditService auditService;
@@ -132,11 +133,19 @@ public class UserService {
     @Transactional
     public UserResponse uploadAvatar(MultipartFile file) {
         User user = currentUserEntity();
+        String previousObjectKey = user.getAvatarObjectKey();
         try {
             String objectKey = fileStorageService.uploadAvatar(file, "avatars");
+            String bucketName = fileStorageService.getBucketName();
+            storageCleanupService.enqueueProvisional(bucketName, objectKey);
             user.setAvatarObjectKey(objectKey);
             user.setAvatarUrl("/api/users/" + user.getId() + "/avatar");
-            return userMapper.toResponse(userRepository.save(user));
+            User saved = userRepository.save(user);
+            storageCleanupService.retain(bucketName, objectKey);
+            if (previousObjectKey != null && !previousObjectKey.isBlank() && !previousObjectKey.equals(objectKey)) {
+                storageCleanupService.enqueue(bucketName, previousObjectKey);
+            }
+            return userMapper.toResponse(saved);
         } catch (IOException e) {
             throw new IllegalArgumentException("Invalid avatar upload");
         }

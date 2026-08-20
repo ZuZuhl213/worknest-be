@@ -39,6 +39,7 @@ import com.hoang.worknest.repository.AttachmentRepository;
 import com.hoang.worknest.repository.TaskRepository;
 import com.hoang.worknest.repository.UserRepository;
 import com.hoang.worknest.repository.ProjectMemberRepository;
+import com.hoang.worknest.repository.ProjectRepository;
 import com.hoang.worknest.repository.specification.TaskSpecifications;
 import com.hoang.worknest.security.CurrentUserService;
 import com.hoang.worknest.security.ProjectAuthorizationService;
@@ -57,6 +58,7 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
     private final ProjectMemberRepository projectMemberRepository;
+    private final ProjectRepository projectRepository;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
     private final CurrentUserService currentUserService;
@@ -64,12 +66,16 @@ public class TaskService {
     private final ActivityLogService activityLogService;
     private final AttachmentRepository attachmentRepository;
     private final FileStorageService fileStorageService;
+    private final StorageCleanupService storageCleanupService;
     private final ProjectAuthorizationService projectAuthorizationService;
 
     @Transactional
     @CacheEvict(cacheNames = CacheConfig.TASKS_BY_PROJECT, key = "#projectId")
     public TaskResponse create(Long workspaceId, Long projectId, TaskCreateRequest request) {
-        Project project = projectAuthorizationService.requireMember(workspaceId, projectId);
+        projectAuthorizationService.requireMember(workspaceId, projectId);
+        Project project = projectRepository.findByIdForUpdate(projectId)
+            .filter(candidate -> candidate.getWorkspace().getId().equals(workspaceId))
+            .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
         User reporter = requireCurrentUserEntity();
         if (request.assigneeUserId() != null) {
             projectAuthorizationService.requireTaskManager(workspaceId, projectId);
@@ -83,6 +89,7 @@ public class TaskService {
         task.setReporter(reporter);
         task.setAssignee(assignee);
         task.setTaskNumber(nextTaskNumber);
+        applyTimeline(task);
 
         Task savedTask = taskRepository.save(task);
         if (assignee != null) {
@@ -310,7 +317,8 @@ public class TaskService {
         
         try {
             FileStorageService.StoredFile stored = fileStorageService.uploadAttachment(file, "tasks/" + taskId);
-            
+            storageCleanupService.enqueueProvisional(fileStorageService.getBucketName(), stored.objectKey());
+
             Attachment attachment = Attachment.builder()
                 .task(task)
                 .uploadedBy(uploader)
@@ -322,7 +330,8 @@ public class TaskService {
                 .build();
                 
             attachment = attachmentRepository.save(attachment);
-            
+            storageCleanupService.retain(attachment.getBucketName(), attachment.getObjectKey());
+
             String url = fileStorageService.generatePresignedUrl(stored.objectKey(), Duration.ofMinutes(10));
             return new AttachmentResponse(
                 attachment.getId(),
@@ -372,7 +381,7 @@ public class TaskService {
 
         Attachment attachment = attachmentRepository.findByIdAndTaskId(attachmentId, taskId)
             .orElseThrow(() -> new ResourceNotFoundException("Attachment not found"));
-        fileStorageService.deleteObject(attachment.getObjectKey());
+        storageCleanupService.enqueue(attachment.getBucketName(), attachment.getObjectKey());
         attachmentRepository.delete(attachment);
     }
 
@@ -387,7 +396,7 @@ public class TaskService {
     private void deleteAttachmentsForTask(Long taskId) {
         List<Attachment> attachments = attachmentRepository.findByTaskId(taskId);
         for (Attachment attachment : attachments) {
-            fileStorageService.deleteObject(attachment.getObjectKey());
+            storageCleanupService.enqueue(attachment.getBucketName(), attachment.getObjectKey());
         }
         attachmentRepository.deleteAll(attachments);
     }

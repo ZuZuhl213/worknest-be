@@ -8,6 +8,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.repository.query.Param;
+
 import jakarta.persistence.LockModeType;
 
 import com.hoang.worknest.enums.SystemRole;
@@ -22,6 +24,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<User> findBySystemRoleAndIsActiveTrueOrderById(SystemRole systemRole);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select user from User user where user.id = :userId")
+    Optional<User> findByIdForUpdate(@Param("userId") Long userId);
 
     long countByIsActiveTrue();
     long countByIsActiveFalse();

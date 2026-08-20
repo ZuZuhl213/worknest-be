@@ -22,6 +22,7 @@ import com.hoang.worknest.entity.Workspace;
 import com.hoang.worknest.enums.ProjectRole;
 import com.hoang.worknest.enums.SystemRole;
 import com.hoang.worknest.mapper.ProjectMapper;
+import com.hoang.worknest.repository.AttachmentRepository;
 import com.hoang.worknest.repository.ProjectMemberRepository;
 import com.hoang.worknest.repository.ProjectRepository;
 import com.hoang.worknest.repository.UserRepository;
@@ -38,6 +39,8 @@ class ProjectServiceTest {
 
     @Mock ProjectRepository projectRepository;
     @Mock ProjectMemberRepository projectMemberRepository;
+    @Mock AttachmentRepository attachmentRepository;
+    @Mock StorageCleanupService storageCleanupService;
     @Mock ProjectMapper projectMapper;
     @Mock WorkspaceAccessService workspaceAccessService;
     @Mock CurrentUserService currentUserService;
@@ -52,6 +55,8 @@ class ProjectServiceTest {
         projectService = new ProjectService(
             projectRepository,
             projectMemberRepository,
+            attachmentRepository,
+            storageCleanupService,
             projectMapper,
             workspaceAccessService,
             currentUserService,

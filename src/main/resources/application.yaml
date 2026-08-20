@@ -20,8 +20,8 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: true
+      ddl-auto: validate
+    show-sql: false
     properties:
       hibernate:
         format_sql: true
@@ -40,12 +40,19 @@ spring:
     type: redis
 
   quartz:
-    job-store-type: memory
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
     properties:
       org:
         quartz:
           scheduler:
             instanceName: WorkNestScheduler
+            instanceId: AUTO
+          jobStore:
+            class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
+            driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+            isClustered: true
           threadPool:
             threadCount: 3
 
@@ -64,6 +71,12 @@ spring:
 server:
   port: ${SERVER_PORT:${PORT:8000}}
   forward-headers-strategy: framework
+  error:
+    include-message: never
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId}] %logger{36} - %msg%n"
 
 aws:
   s3:
@@ -93,6 +106,10 @@ app:
   scheduler:
     overdue-task:
       interval-ms: ${OVERDUE_TASK_INTERVAL_MS:300000}
+    storage-cleanup:
+      interval-ms: ${STORAGE_CLEANUP_INTERVAL_MS:60000}
+  storage-cleanup:
+    grace-period-ms: ${STORAGE_CLEANUP_GRACE_PERIOD_MS:86400000}
 
 security:
   clamav:

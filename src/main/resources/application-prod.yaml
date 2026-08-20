@@ -10,6 +10,11 @@ spring:
     redis:
       url: ${REDIS_URL}
 
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
+
 springdoc:
   api-docs:
     enabled: false

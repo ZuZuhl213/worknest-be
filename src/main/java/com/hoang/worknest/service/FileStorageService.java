@@ -4,6 +4,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Iterator;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -16,6 +17,8 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -38,6 +41,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class FileStorageService {
     private static final long AVATAR_LIMIT = 2L * 1024 * 1024;
+    private static final int AVATAR_MAX_DIMENSION = 4_096;
+    private static final long AVATAR_MAX_PIXELS = 4_194_304L;
     private static final long ATTACHMENT_LIMIT = 10L * 1024 * 1024;
     private static final long OOXML_EXPANDED_LIMIT = 50L * 1024 * 1024;
     private static final Set<String> OFFICE_EXTENSIONS = Set.of("docx", "xlsx", "pptx");
@@ -52,6 +57,7 @@ public class FileStorageService {
     public String uploadAvatar(MultipartFile file, String folder) throws IOException {
         byte[] original = readWithinLimit(file, AVATAR_LIMIT, "Avatar exceeds 2 MiB");
         ensureImageSignature(original);
+        validateAvatarDimensions(original);
         BufferedImage image = ImageIO.read(new ByteArrayInputStream(original));
         if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
             throw new IllegalArgumentException("Avatar is not a decodable PNG, JPEG, or WebP image");
@@ -113,7 +119,11 @@ public class FileStorageService {
     }
 
     public void deleteObject(String objectKey) {
-        s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucketName).key(objectKey).build());
+        deleteObject(bucketName, objectKey);
+    }
+
+    public void deleteObject(String bucket, String objectKey) {
+        s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(objectKey).build());
     }
 
     private String quarantineScanAndPromote(
@@ -195,6 +205,34 @@ public class FileStorageService {
         throw new IllegalArgumentException(
             "Unsupported attachment. Allowed: PDF, PNG, JPEG, WebP, TXT, CSV, DOCX, XLSX, PPTX"
         );
+    }
+
+    private void validateAvatarDimensions(byte[] bytes) {
+        try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (input == null) {
+                throw new IllegalArgumentException("Avatar is not a readable image");
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) {
+                throw new IllegalArgumentException("Avatar is not a readable image");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(input, true, true);
+                int width = reader.getWidth(0);
+                int height = reader.getHeight(0);
+                if (width <= 0 || height <= 0
+                    || width > AVATAR_MAX_DIMENSION
+                    || height > AVATAR_MAX_DIMENSION
+                    || (long) width * height > AVATAR_MAX_PIXELS) {
+                    throw new IllegalArgumentException("Avatar dimensions exceed the 4 megapixel limit");
+                }
+            } finally {
+                reader.dispose();
+            }
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("Avatar is not a readable image", ex);
+        }
     }
 
     private void ensureImageSignature(byte[] bytes) {

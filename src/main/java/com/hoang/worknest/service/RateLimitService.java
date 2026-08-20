@@ -4,44 +4,58 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.List;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import lombok.extern.slf4j.Slf4j;
+
 import com.hoang.worknest.exception.TooManyRequestsException;
+import com.hoang.worknest.exception.ServiceUnavailableException;
 
 import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RateLimitService {
+    private static final DefaultRedisScript<Long> INCREMENT_WITH_TTL = new DefaultRedisScript<>(
+        "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
+        Long.class
+    );
     private final StringRedisTemplate redisTemplate;
     private final SecurityAuditService auditService;
 
     public void check(String scope, String identity, int limit, Duration window) {
-        checkCurrent(scope, identity, limit, window);
-        increment(scope, identity, window);
+        String key = key(scope, identity);
+        try {
+            Long count = redisTemplate.execute(INCREMENT_WITH_TTL, List.of(key), Long.toString(window.toSeconds()));
+            if (count == null) throw new IllegalStateException("Rate-limit counter did not return a value");
+            if (count > limit) reject(scope, key, window);
+        } catch (TooManyRequestsException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.warn("Redis unavailable for rate-limit scope {}", scope);
+            throw new ServiceUnavailableException("Authentication service temporarily unavailable", ex);
+        }
     }
 
     public void checkCurrent(String scope, String identity, int limit, Duration window) {
-        String key = key(scope, identity);
-        String rawCount = redisTemplate.opsForValue().get(key);
-        long count = rawCount == null ? 0 : Long.parseLong(rawCount);
-        if (count >= limit) {
-            reject(scope, key, window);
-        }
+        check(scope, identity, limit, window);
     }
 
     public void increment(String scope, String identity, Duration window) {
-        String key = key(scope, identity);
-        Long count = redisTemplate.opsForValue().increment(key);
-        if (count != null && count == 1L) {
-            redisTemplate.expire(key, window);
-        }
+        check(scope, identity, Integer.MAX_VALUE, window);
     }
 
     public void reset(String scope, String identity) {
-        redisTemplate.delete(key(scope, identity));
+        try {
+            redisTemplate.delete(key(scope, identity));
+        } catch (RuntimeException ex) {
+            throw new ServiceUnavailableException("Authentication service temporarily unavailable", ex);
+        }
     }
 
     private void reject(String scope, String key, Duration window) {

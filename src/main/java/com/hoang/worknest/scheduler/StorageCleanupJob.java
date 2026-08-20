@@ -7,19 +7,18 @@ import org.springframework.lang.NonNull;
 import org.springframework.scheduling.quartz.QuartzJobBean;
 import org.springframework.stereotype.Component;
 
-import com.hoang.worknest.service.OverdueTaskService;
+import com.hoang.worknest.service.StorageCleanupService;
 
 import lombok.RequiredArgsConstructor;
 
 @Component
 @DisallowConcurrentExecution
 @RequiredArgsConstructor
-public class OverdueTaskJob extends QuartzJobBean {
-
-    private final OverdueTaskService overdueTaskService;
+public class StorageCleanupJob extends QuartzJobBean {
+    private final StorageCleanupService storageCleanupService;
 
     @Override
     protected void executeInternal(@NonNull JobExecutionContext context) throws JobExecutionException {
-        overdueTaskService.notifyOverdueTasks();
+        storageCleanupService.processDueJobs();
     }
 }

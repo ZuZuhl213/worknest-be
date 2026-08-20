@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.hoang.worknest.scheduler.OverdueTaskJob;
+import com.hoang.worknest.scheduler.StorageCleanupJob;
 
 @Configuration
 public class QuartzConfig {
@@ -32,6 +33,30 @@ public class QuartzConfig {
             .withIdentity("overdueTaskTrigger")
             .withSchedule(SimpleScheduleBuilder.simpleSchedule()
                 .withIntervalInMilliseconds(intervalMs)
+                .withMisfireHandlingInstructionNextWithExistingCount()
+                .repeatForever())
+            .build();
+    }
+
+    @Bean
+    public JobDetail storageCleanupJobDetail() {
+        return JobBuilder.newJob(StorageCleanupJob.class)
+            .withIdentity("storageCleanupJob")
+            .storeDurably()
+            .build();
+    }
+
+    @Bean
+    public Trigger storageCleanupTrigger(
+        JobDetail storageCleanupJobDetail,
+        @Value("${app.scheduler.storage-cleanup.interval-ms:60000}") long intervalMs
+    ) {
+        return TriggerBuilder.newTrigger()
+            .forJob(storageCleanupJobDetail)
+            .withIdentity("storageCleanupTrigger")
+            .withSchedule(SimpleScheduleBuilder.simpleSchedule()
+                .withIntervalInMilliseconds(intervalMs)
+                .withMisfireHandlingInstructionNextWithExistingCount()
                 .repeatForever())
             .build();
     }

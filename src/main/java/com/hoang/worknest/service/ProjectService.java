@@ -22,6 +22,7 @@ import com.hoang.worknest.enums.ProjectRole;
 import com.hoang.worknest.exception.ConflictException;
 import com.hoang.worknest.exception.ResourceNotFoundException;
 import com.hoang.worknest.mapper.ProjectMapper;
+import com.hoang.worknest.repository.AttachmentRepository;
 import com.hoang.worknest.repository.ProjectMemberRepository;
 import com.hoang.worknest.repository.ProjectRepository;
 import com.hoang.worknest.repository.UserRepository;
@@ -38,6 +39,8 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
+    private final AttachmentRepository attachmentRepository;
+    private final StorageCleanupService storageCleanupService;
     private final ProjectMapper projectMapper;
     private final WorkspaceAccessService workspaceAccessService;
     private final CurrentUserService currentUserService;
@@ -159,6 +162,9 @@ public class ProjectService {
             "PROJECT",
             project.getId(),
             Map.of("projectKey", project.getProjectKey())
+        );
+        attachmentRepository.findStorageObjectsByProjectId(projectId).forEach(storageObject ->
+            storageCleanupService.enqueue(storageObject.getBucketName(), storageObject.getObjectKey())
         );
         projectRepository.delete(project);
     }

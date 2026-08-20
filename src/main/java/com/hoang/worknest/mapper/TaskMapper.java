@@ -18,7 +18,6 @@ public interface TaskMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "project", ignore = true)
     @Mapping(target = "taskNumber", ignore = true)
-    @Mapping(target = "status", expression = "java(com.hoang.worknest.enums.TaskStatus.TODO)")
     @Mapping(target = "assignee", ignore = true)
     @Mapping(target = "reporter", ignore = true)
     @Mapping(target = "startedAt", ignore = true)

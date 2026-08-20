@@ -105,11 +105,10 @@ public class AuthService {
     public AuthSession login(LoginRequest request) {
         String email = normalizeEmail(request.email());
         rateLimitService.check("login-ip", securityAuditService.currentClientAddress(), 30, Duration.ofMinutes(15));
-        rateLimitService.checkCurrent("login-account", email, 5, Duration.ofMinutes(15));
+        rateLimitService.check("login-account", email, 5, Duration.ofMinutes(15));
         try {
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, request.password()));
         } catch (AuthenticationException ex) {
-            rateLimitService.increment("login-account", email, Duration.ofMinutes(15));
             securityAuditService.log(null, null, "LOGIN", "FAILED", Map.of("emailHash", hash(email)));
             throw ex;
         }

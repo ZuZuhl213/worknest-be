@@ -55,6 +55,7 @@ class TaskServiceTest {
     @Mock ActivityLogService activityLogService;
     @Mock AttachmentRepository attachmentRepository;
     @Mock FileStorageService fileStorageService;
+    @Mock StorageCleanupService storageCleanupService;
     @Mock ProjectRepository projectRepository;
     @Mock WorkspaceMemberRepository workspaceMemberRepository;
 
@@ -72,6 +73,7 @@ class TaskServiceTest {
             taskRepository,
             userRepository,
             projectMemberRepository,
+            projectRepository,
             taskMapper,
             userMapper,
             currentUserService,
@@ -79,6 +81,7 @@ class TaskServiceTest {
             activityLogService,
             attachmentRepository,
             fileStorageService,
+            storageCleanupService,
             authorization
         );
     }

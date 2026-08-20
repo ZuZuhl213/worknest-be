@@ -35,6 +35,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -44,6 +45,13 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.quartz.Job;
+import org.quartz.JobBuilder;
+import org.quartz.JobExecutionContext;
+import org.quartz.JobKey;
+import org.quartz.Scheduler;
+import org.quartz.Trigger;
+import org.quartz.TriggerBuilder;
 
 import com.hoang.worknest.dto.auth.ForgotPasswordRequest;
 import com.hoang.worknest.dto.auth.LoginRequest;
@@ -117,6 +125,8 @@ class WorknestApplicationTests {
     @Autowired UserRepository userRepository;
     @Autowired JwtService jwtService;
     @Autowired StringRedisTemplate redisTemplate;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired Scheduler scheduler;
     @Autowired AccountTokenService accountTokenService;
     @Autowired WorkspaceRepository workspaceRepository;
     @Autowired WorkspaceMemberRepository workspaceMemberRepository;
@@ -154,6 +164,38 @@ class WorknestApplicationTests {
 
     @Test
     void contextLoadsAgainstIsolatedPostgresAndRedis() {
+    }
+
+    @Test
+    void quartzPersistsScheduledJobsInPostgres() throws Exception {
+        String suffix = UUID.randomUUID().toString();
+        JobKey jobKey = new JobKey("test-job-" + suffix, "test");
+        Trigger trigger = TriggerBuilder.newTrigger()
+            .withIdentity("test-trigger-" + suffix, "test")
+            .forJob(jobKey)
+            .startAt(java.util.Date.from(java.time.Instant.now().plusSeconds(3600)))
+            .build();
+
+        try {
+            scheduler.scheduleJob(JobBuilder.newJob(NoOpJob.class).withIdentity(jobKey).storeDurably().build(), trigger);
+
+            assertTrue(scheduler.checkExists(jobKey));
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(*) from qrtz_job_details where job_name = ? and job_group = ?", Integer.class,
+                jobKey.getName(), jobKey.getGroup()));
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "select count(*) from qrtz_triggers where trigger_name = ? and trigger_group = ?", Integer.class,
+                trigger.getKey().getName(), trigger.getKey().getGroup()));
+        } finally {
+            scheduler.unscheduleJob(trigger.getKey());
+            scheduler.deleteJob(jobKey);
+        }
+    }
+
+    public static class NoOpJob implements Job {
+        @Override
+        public void execute(JobExecutionContext context) {
+        }
     }
 
     @Test
@@ -357,6 +399,18 @@ class WorknestApplicationTests {
     }
 
     @Test
+    void workspaceOwnerCanDeleteWorkspace() throws Exception {
+        ProjectFixture fixture = createProjectFixture(ProjectRole.MEMBER);
+
+        mockMvc.perform(delete("/api/workspaces/{id}", fixture.workspace().getId())
+                .with(csrf())
+                .header("Authorization", "Bearer " + jwtService.generateAccessToken(fixture.owner())))
+            .andExpect(status().isNoContent());
+
+        assertTrue(workspaceRepository.findById(fixture.workspace().getId()).isEmpty());
+    }
+
+    @Test
     void workspaceCreationRequiresEntitlementAndCountsArchivedWorkspaces() throws Exception {
         User unentitled = saveUser(SystemRole.USER);
         mockMvc.perform(post("/api/workspaces")
@@ -544,7 +598,10 @@ class WorknestApplicationTests {
                 .header("Authorization", "Bearer " + jwtService.generateAccessToken(fixture.member())))
             .andExpect(status().isNoContent());
 
-        verify(fileStorageService).deleteObject(attachment.getObjectKey());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "select count(*) from storage_cleanup_jobs where bucket_name = ? and object_key = ?",
+            Integer.class, attachment.getBucketName(), attachment.getObjectKey()
+        ));
         assertFalse(attachmentRepository.findById(attachment.getId()).isPresent());
     }
 
@@ -578,7 +635,10 @@ class WorknestApplicationTests {
                 .header("Authorization", "Bearer " + jwtService.generateAccessToken(fixture.member())))
             .andExpect(status().isNoContent());
 
-        verify(fileStorageService).deleteObject(attachment.getObjectKey());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "select count(*) from storage_cleanup_jobs where bucket_name = ? and object_key = ?",
+            Integer.class, attachment.getBucketName(), attachment.getObjectKey()
+        ));
         assertTrue(attachmentRepository.findByTaskId(task.getId()).isEmpty());
     }
 

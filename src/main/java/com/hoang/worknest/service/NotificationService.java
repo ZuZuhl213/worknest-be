@@ -46,17 +46,9 @@ public class NotificationService {
 
         String title = "Task overdue";
         String content = "Task #" + taskId + " is overdue: " + taskTitle;
-        if (notificationRepository.existsByUserIdAndTitleAndContent(user.getId(), title, content)) {
-            return;
-        }
-
-        Notification notification = Notification.builder()
-            .user(user)
-            .title(title)
-            .content(content)
-            .read(Boolean.FALSE)
-            .build();
-        notificationRepository.save(notification);
+        notificationRepository.insertIfAbsent(
+            user.getId(), title, content, "overdue-task:" + taskId
+        );
     }
 
     @Transactional(readOnly = true)

@@ -43,6 +43,9 @@ public class Notification {
     @Column(name = "content", nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    @Column(name = "deduplication_key", length = 255)
+    private String deduplicationKey;
+
     @Column(name = "is_read", nullable = false)
     @Builder.Default
     private Boolean read = Boolean.FALSE;
