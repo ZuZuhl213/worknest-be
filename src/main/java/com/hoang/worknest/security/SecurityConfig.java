@@ -18,19 +18,13 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
-import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
-import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 
 import lombok.RequiredArgsConstructor;
 
@@ -64,7 +58,7 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())
             .csrf(csrf -> csrf
                 .csrfTokenRepository(csrfTokenRepository)
-                .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
             )
             .formLogin(form -> form.disable())
             .httpBasic(basic -> basic.disable())
@@ -140,23 +134,5 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
-    }
-
-    private static final class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
-        private final CsrfTokenRequestHandler plain = new CsrfTokenRequestAttributeHandler();
-        private final CsrfTokenRequestHandler xor = new XorCsrfTokenRequestAttributeHandler();
-
-        @Override
-        public void handle(HttpServletRequest request, HttpServletResponse response, java.util.function.Supplier<CsrfToken> token) {
-            xor.handle(request, response, token);
-            token.get();
-        }
-
-        @Override
-        public String resolveCsrfTokenValue(HttpServletRequest request, CsrfToken token) {
-            return request.getHeader(token.getHeaderName()) != null
-                ? plain.resolveCsrfTokenValue(request, token)
-                : xor.resolveCsrfTokenValue(request, token);
-        }
     }
 }
