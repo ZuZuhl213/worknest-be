@@ -47,12 +47,23 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
     private String allowedOrigins;
 
+    @Value("${app.auth.cookie-secure:false}")
+    private boolean cookieSecure;
+
+    @Value("${app.auth.cookie-same-site:Lax}")
+    private String cookieSameSite;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        CookieCsrfTokenRepository csrfTokenRepository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        csrfTokenRepository.setCookieCustomizer(cookie -> cookie
+            .secure(cookieSecure)
+            .sameSite(cookieSameSite));
+
         return http
             .cors(Customizer.withDefaults())
             .csrf(csrf -> csrf
-                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                .csrfTokenRepository(csrfTokenRepository)
                 .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
             )
             .formLogin(form -> form.disable())
