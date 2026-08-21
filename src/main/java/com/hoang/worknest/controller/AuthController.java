@@ -42,6 +42,9 @@ public class AuthController {
     @Value("${app.auth.cookie-secure:false}")
     private boolean cookieSecure;
 
+    @Value("${app.auth.cookie-same-site:Lax}")
+    private String cookieSameSite;
+
     @PostMapping("/register")
     public ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
         authService.register(request);
@@ -120,7 +123,7 @@ public class AuthController {
         return ResponseCookie.from("worknest_rt", session.refreshToken())
             .httpOnly(true)
             .secure(cookieSecure)
-            .sameSite("Strict")
+            .sameSite(cookieSameSite)
             .path("/api/auth")
             .maxAge(maxAge)
             .build();
@@ -130,7 +133,7 @@ public class AuthController {
         return ResponseCookie.from("worknest_rt", "")
             .httpOnly(true)
             .secure(cookieSecure)
-            .sameSite("Strict")
+            .sameSite(cookieSameSite)
             .path("/api/auth")
             .maxAge(0)
             .build();
