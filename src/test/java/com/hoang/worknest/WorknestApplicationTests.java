@@ -167,6 +167,32 @@ class WorknestApplicationTests {
     }
 
     @Test
+    void csrfEndpointIssuesPlainBodyToken() throws Exception {
+        var result = mockMvc.perform(get("/api/auth/csrf"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.token").isString())
+            .andReturn();
+
+        String bodyToken = new com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(result.getResponse().getContentAsString())
+            .get("token")
+            .asText();
+
+        assertFalse(bodyToken.isBlank());
+    }
+
+    @Test
+    void loginWithoutCsrfTokenIsForbidden() throws Exception {
+        mockMvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"email":"missing@example.com","password":"password123"}
+                    """))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message").value("CSRF token is missing. Refresh the page and try again."));
+    }
+
+    @Test
     void quartzPersistsScheduledJobsInPostgres() throws Exception {
         String suffix = UUID.randomUUID().toString();
         JobKey jobKey = new JobKey("test-job-" + suffix, "test");
